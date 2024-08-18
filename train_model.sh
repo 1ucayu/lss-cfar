@@ -1,0 +1,48 @@
+#!/bin/bash
+
+# Training script for the LSSL model
+
+# Set default values for hyperparameters (you can change these if needed)
+DATASET_PATH="/data/lucayu/lss-cfar"
+NUM_LAYERS=10
+HIDDEN_DIM=142 #142
+ORDER=87
+DT_MIN=1e-3
+DT_MAX=1e-1
+CHANNELS=1
+DROPOUT=0.1
+LEARNING_RATE=1e-1
+BATCH_SIZE=4
+NUM_WORKERS=4
+TOTAL_STEPS=10000
+WEIGHT_DECAY=1e-5
+OPTIMIZER="AdamW"
+STEP_SIZE=500
+GAMMA=0.8
+SAVE_DIR="./checkpoints"
+VISUALIZATION_STRIDE=100
+GPUS="0"
+LOG_DIR="./logs"
+
+# Run the training script
+python train_model.py \
+  --dataset_path $DATASET_PATH \
+  --num_layers $NUM_LAYERS \
+  --hidden_dim $HIDDEN_DIM \
+  --order $ORDER \
+  --dt_min $DT_MIN \
+  --dt_max $DT_MAX \
+  --channels $CHANNELS \
+  --dropout $DROPOUT \
+  --learning_rate $LEARNING_RATE \
+  --batch_size $BATCH_SIZE \
+  --num_workers $NUM_WORKERS \
+  --total_steps $TOTAL_STEPS \
+  --weight_decay $WEIGHT_DECAY \
+  --optimizer $OPTIMIZER \
+  --step_size $STEP_SIZE \
+  --gamma $GAMMA \
+  --save_dir $SAVE_DIR \
+  --visualization_stride $VISUALIZATION_STRIDE \
+  --gpus $GPUS \
+  --log_dir $LOG_DIR
