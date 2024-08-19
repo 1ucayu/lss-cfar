@@ -5,9 +5,9 @@
 # Set default values for hyperparameters (you can change these if needed)
 DATASET_PATH="/data/lucayu/lss-cfar"
 NUM_LAYERS=10
-HIDDEN_DIM=142 #142
-ORDER=87
-DT_MIN=1e-3
+HIDDEN_DIM=256 #142
+ORDER=1
+DT_MIN=8e-5
 DT_MAX=1e-1
 CHANNELS=1
 DROPOUT=0.1

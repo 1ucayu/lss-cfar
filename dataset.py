@@ -28,6 +28,9 @@ class lsscfarDataset(Dataset):
         raw_pointcloud = data['pointcloud']
         spectrum = torch.tensor(data['spectrum'], dtype=torch.float32)
         pointcloud = self._pointcloud_process(raw_pointcloud, spectrum)
+        # flatten the spectrum and pointcloud
+        spectrum = spectrum.flatten()
+        pointcloud = pointcloud.flatten()
         result = {
             'pointcloud': pointcloud,    #.transpose(0, -1),
             'spectrum': spectrum    #.transpose(0, -1)

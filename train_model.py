@@ -27,9 +27,9 @@ def generate_checkpoint_name(args):
 
 def visualize_result(spectrum, pointcloud_pred, pointcloud_gt, writer, step):
     idx = np.random.randint(0, spectrum.shape[1])  # Randomly select one from the batch
-    spectrum_np = spectrum[:, idx].squeeze().cpu().numpy()
-    pointcloud_pred_np = pointcloud_pred[:, idx].squeeze().detach().cpu().numpy()  # Detach before converting to NumPy
-    pointcloud_gt_np = pointcloud_gt[:, idx].squeeze().cpu().numpy()
+    spectrum_np = spectrum[:, idx].squeeze().cpu().numpy().reshape(142, 87)
+    pointcloud_pred_np = pointcloud_pred[:, idx].squeeze().detach().cpu().numpy().reshape(142, 87)  # Detach before converting to NumPy
+    pointcloud_gt_np = pointcloud_gt[:, idx].squeeze().cpu().numpy().reshape(142, 87)
 
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
 
