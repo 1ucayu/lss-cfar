@@ -12,10 +12,10 @@ class BCEWithLogitsLoss(nn.Module):
             pos_weight (Tensor, optional): A weight of positive examples. Must be a vector with length equal to the number of classes.
         """
         super(BCEWithLogitsLoss, self).__init__()
-        # self.criterion = nn.BCEWithLogitsLoss(weight=weight, reduction=reduction, pos_weight=pos_weight)
+        self.criterion = nn.BCEWithLogitsLoss(weight=weight, reduction=reduction, pos_weight=pos_weight)
         # self.criterion = nn.BCELoss(weight=weight, reduction=reduction)
         # apply L1 loss
-        self.criterion = nn.L1Loss(reduction=reduction)
+        # self.criterion = nn.L1Loss(reduction=reduction)
 
     def forward(self, input, target):
         """
@@ -29,8 +29,8 @@ class BCEWithLogitsLoss(nn.Module):
             Tensor: The computed loss.
         """
         # Permute input and target to move batch size to the first dimension
-        input = input.permute(1, 0, 2)  # From [H, B, W] to [B, H, W]
-        target = target.permute(1, 0, 2)  # From [H, B, W] to [B, H, W]
+        # input = input.permute(1, 0, 2)  # From [H, B, W] to [B, H, W]
+        # target = target.permute(1, 0, 2)  # From [H, B, W] to [B, H, W]
 
         return self.criterion(input, target)
     

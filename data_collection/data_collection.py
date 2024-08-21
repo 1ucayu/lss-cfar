@@ -45,7 +45,7 @@ def on_esc_key_press():
     logger.info("Esc key pressed, stopping data collection...")
 
 # Register Esc key listener
-keyboard.add_hotkey('esc', on_esc_key_press)
+# keyboard.add_hotkey('esc', on_esc_key_press)
 
 # FPS calculation variables
 prev_time_cam = time.time()

@@ -7,20 +7,11 @@ from einops import rearrange
 from loguru import logger
 
 def triangular_toeplitz_multiply(u, v):
-    '''
-    input u should has shape: [M, 1, H, L]
-    input v should has shape: [1, B, H, L]
-    '''
-    # logger.info(u.shape)
-    # logger.info(v.shape)
     n = u.shape[-1]
     u_expand = F.pad(u, (0, n))
     v_expand = F.pad(v, (0, n))
     u_f = torch.fft.rfft(u_expand, n=2*n, dim=-1)
     v_f = torch.fft.rfft(v_expand, n=2*n, dim=-1)
-
-    # logger.info(u_f.shape)
-    # logger.info(v_f.shape)
     uv_f = u_f * v_f
     output = torch.fft.irfft(uv_f, n=2*n, dim=-1)[..., :n]
     return output
@@ -98,47 +89,6 @@ class AdaptiveTransition(nn.Module):
     def inverse_mult(self, u, delta): # TODO swap u, delta everywhere
         """ Computes (I - d A)^-1 u """
         raise NotImplementedError
-
-    # def forward_mult(self, u, delta):
-    #     """ Computes (I + delta * A) u
-    #     A: (n, n)
-    #     u: (..., n)
-    #     delta: (...) or scalar
-    #     output: (..., n)
-    #     """
-    #     # Ensure delta is compatible for broadcasting
-    #     if isinstance(delta, torch.Tensor):
-    #         delta = delta.unsqueeze(-1)
-
-    #     # Compute (I + delta * A)
-    #     A_ = self.A  # (n, n)
-    #     matrix = self.I + delta * A_  # (n, n) with broadcasting if delta is (..., 1)
-
-    #     # Perform matrix-vector multiplication
-    #     output = torch.matmul(matrix, u.unsqueeze(-1)).squeeze(-1)  # (..., n)
-        
-    #     return output
-    
-    # def inverse_mult(self, u, delta):
-    #     """ Computes (I - delta * A)^-1 u
-    #     A: (n, n)
-    #     u: (..., n)
-    #     delta: (...) or scalar
-    #     output: (..., n)
-    #     """
-    #     # Ensure delta is compatible for broadcasting
-    #     if isinstance(delta, torch.Tensor):
-    #         delta = delta.unsqueeze(-1).unsqueeze(-1)
-
-    #     # Compute the matrix (I - delta * A)
-    #     matrix = self.I - delta * self.A  # (n, n) with broadcasting
-
-    #     # Solve the system (I - delta * A) * x = u for x
-    #     output = torch.linalg.solve(matrix, u.unsqueeze(-1)).squeeze(-1)  # (..., n)
-        
-    #     return output
-
-
 
     def forward_diff(self, d, u, v):
         """ Computes the 'forward diff' or Euler update rule: (I - d A)^-1 u + d B v
@@ -288,8 +238,8 @@ class StateSpace(nn.Module):
         y = self.dropout(self.activation_fn(y))
 
         # Linear
-        # y = rearrange(y, 'l b h m -> l b (h m)') # (L, B, H*M)
-        # y = self.output_linear(y) # (L, B, H)
+        y = rearrange(y, 'l b h m -> l b (h m)') # (L, B, H*M)
+        y = self.output_linear(y) # (L, B, H)
         return y
 
     def linear_system_from_krylov(self, u, k):
@@ -301,30 +251,19 @@ class StateSpace(nn.Module):
         k: (..., N, L) Krylov matrix representing b, Ab, A^2b...
         y: (L, B, ..., M)
         """
-        k = torch.einsum('hmn,hnt->hmt', self.C, k)
-        k = rearrange(k, 'h m l -> m h l')
-        k = k.to(u)
-        k = k.unsqueeze(1)
-        # logger.info(f"u shape: {u.shape}")
-        v = u.unsqueeze(-1).transpose(0, -1)
-        # logger.info(f"v shape: {v.shape}")
-        # broadcast v if v has 3 dimensions
-        if len(v.shape) == 3:
-            v = v.unsqueeze(2).expand(-1, -1, k.shape[2], -1)
-        y = triangular_toeplitz_multiply(k, v)
-        y = y.transpose(0, -1)
 
-        logger.debug(f"y shape: {y.shape}")
-        logger.debug(f"D shape: {self.D.shape}")
-        logger.debug(f"u shape: {u.shape}")
-        
-        u_expanded = u.unsqueeze(-1).expand(-1, -1, y.shape[-2])
-        logger.info(f"u_expanded shape: {u_expanded.shape}")
-        # y = y + u.unsqueeze(-1) * self.D.to(device=y.device)
-        y = y + u_expanded.unsqueeze(-1) * self.D.to(device=y.device)
-        # y = y.sum(dim=-2)
-        logger.info(y.shape)
 
+        k = self.C @ k # (..., M, L)
+
+        k = rearrange(k, '... m l -> m ... l')
+        k = k.to(u) # if training in half precision, need to go back to float32 for the fft
+        k = k.unsqueeze(1) # (M, 1, ..., L)
+
+        v = u.unsqueeze(-1).transpose(0, -1) # (1, B, ..., L)
+        y = triangular_toeplitz_multiply(k, v) # (M, B, ..., L)
+        y = y.transpose(0, -1) # (L, B, ..., M)
+        y = y + u.unsqueeze(-1) * self.D.to(device=y.device) # (L, B, ..., M)
+        # print(y.shape)
         return y
 
 class LSSLModel(nn.Module):
@@ -335,23 +274,26 @@ class LSSLModel(nn.Module):
             StateSpace(d, order, dt_min, dt_max, channels, dropout) for _ in range(num_layers)
         ])
         self.norms = nn.ModuleList([nn.LayerNorm(d) for _ in range(num_layers)])
+        self.fc = nn.Linear(d, 1)
 
     def forward(self, x):
+        x = x.unsqueeze(-1).expand(-1, -1, self.d)
         for layer, norm in zip(self.layers, self.norms):
-            residual = x.unsqueeze(-1)
-            x = layer(x)
-            logger.info(f"Layer output shape: {x.shape}")
-            # # if residual has 3 dimensions, broadcast it to self.d
-            # if len(residual.shape) == 3:
-            #     residual = residual.expand(-1, -1, self.d, -1)
-            #     logger.info(f"residual shape: {residual.shape}")
-            # x = norm(x + residual)
+            x = x + layer(norm(x))  # Residual connection
+        # x = self.fc(x).squeeze(-1)
+        x = x.mean(dim=-1)
+        # logger.info(x)
+        x = F.sigmoid(x)
         return x
 
- 
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+
+
 
 if __name__ == "__main__":
-    num_layers = 4  # Example number of layers
+    num_layers = 8  # Example number of layers
     # d: hidden states, H; order: state space order, N; channels: M
     model = LSSLModel(num_layers, d=256, order=1, dt_min=1e-3, dt_max=1e-1, channels=1, dropout=0.1)
 
@@ -359,3 +301,6 @@ if __name__ == "__main__":
     output = model(input_tensor)
     logger.info(f"Output shape: {output.shape}")
     logger.info(f"Model info: {model}")
+
+    num_params = count_parameters(model)
+    logger.info(f"Number of parameters in the model: {num_params}")

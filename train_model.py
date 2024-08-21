@@ -27,9 +27,9 @@ def generate_checkpoint_name(args):
 
 def visualize_result(spectrum, pointcloud_pred, pointcloud_gt, writer, step):
     idx = np.random.randint(0, spectrum.shape[1])  # Randomly select one from the batch
-    spectrum_np = spectrum[:, idx].squeeze().cpu().numpy().reshape(142, 87)
-    pointcloud_pred_np = pointcloud_pred[:, idx].squeeze().detach().cpu().numpy().reshape(142, 87)  # Detach before converting to NumPy
-    pointcloud_gt_np = pointcloud_gt[:, idx].squeeze().cpu().numpy().reshape(142, 87)
+    spectrum_np = spectrum[:, idx].squeeze().cpu().view(87, 142).numpy()
+    pointcloud_pred_np = pointcloud_pred[:, idx].squeeze().detach().cpu().view(87, 142).numpy()  # Detach before converting to NumPy
+    pointcloud_gt_np = pointcloud_gt[:, idx].squeeze().cpu().view(87, 142).numpy()
 
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
 
@@ -135,7 +135,7 @@ def train():
                 else:
                     with torch.no_grad():
                         pointcloud_pred = model(spectrum)
-                        # pointcloud_pred = (pointcloud_pred > 0.5).float()  # Binarize the prediction
+                        pointcloud_pred = (pointcloud_pred > 0.5).float()  # Binarize the prediction
                         loss = criterion(pointcloud_pred, pointcloud_gt)
                         accumulated_test_loss += loss.item()
                         num_test_steps += 1

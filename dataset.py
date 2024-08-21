@@ -28,9 +28,11 @@ class lsscfarDataset(Dataset):
         raw_pointcloud = data['pointcloud']
         spectrum = torch.tensor(data['spectrum'], dtype=torch.float32)
         pointcloud = self._pointcloud_process(raw_pointcloud, spectrum)
+        # logger.info(f'Pointcloud shape: {pointcloud.shape}')
         # flatten the spectrum and pointcloud
         spectrum = spectrum.flatten()
         pointcloud = pointcloud.flatten()
+        # logger.info(f'Pointcloud shape: {pointcloud.shape}')
         result = {
             'pointcloud': pointcloud,    #.transpose(0, -1),
             'spectrum': spectrum    #.transpose(0, -1)
@@ -54,7 +56,7 @@ class lsscfarDataset(Dataset):
 # Test function
 def test():
     dataset_path = '/data/lucayu/lss-cfar'
-    phase = ['train', 'test']
+    phase = 'train'
     dataset = lsscfarDataset(phase, dataset_path)
     dataloader = DataLoader(dataset, batch_size=4, shuffle=True, collate_fn=dataset._collate_fn)  # Adjust batch size as needed
 
