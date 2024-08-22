@@ -19,6 +19,7 @@ import pickle
 import os
 import argparse
 import keyboard
+import cv2
 
 # Set up input parameters
 parser = argparse.ArgumentParser(description='Process radar and camera data.')
@@ -34,6 +35,7 @@ test_location = args.location
 enable_visualization = args.visualization
 depth_cam_isRaw = args.depth_cam_isRaw
 save_data = args.save_data
+isReverse = True
 
 # Initialize global stop flag
 stop_flag = False
@@ -45,7 +47,7 @@ def on_esc_key_press():
     logger.info("Esc key pressed, stopping data collection...")
 
 # Register Esc key listener
-# keyboard.add_hotkey('esc', on_esc_key_press)
+keyboard.add_hotkey('esc', on_esc_key_press)
 
 # FPS calculation variables
 prev_time_cam = time.time()
@@ -146,37 +148,70 @@ depth_profile = rs.video_stream_profile(profile.get_stream(rs.stream.depth))
 depth_intrinsics = depth_profile.get_intrinsics()
 w, h = depth_intrinsics.width, depth_intrinsics.height
 
-# Initialize processing blocks
-pc = rs.pointcloud()
-decimate = rs.decimation_filter()
-decimate.set_option(rs.option.filter_magnitude, 2)
+# Getting the depth sensor's depth scale
+depth_sensor = profile.get_device().first_depth_sensor()
+depth_scale = depth_sensor.get_depth_scale()
 
-# Initialize background removal filter
-threshold_filter = rs.threshold_filter()
-threshold_filter.set_option(rs.option.max_distance, 3)
+clipping_distance_in_meters = 1  # 1 meter
+clipping_distance = clipping_distance_in_meters / depth_scale
 
-def get_point_cloud(is_raw=depth_cam_isRaw):
-    """Capture and process the point cloud from the depth camera."""
+# Create an align object
+align_to = rs.stream.color
+align = rs.align(align_to)
+
+def calculate_point_cloud(depth_frame, intrinsics):
+    """
+    Calculate the 3D point cloud manually from a depth frame using camera intrinsics.
+    """
+    height, width = depth_frame.shape
+
+    fx = intrinsics.fx
+    fy = intrinsics.fy
+    ppx = intrinsics.ppx
+    ppy = intrinsics.ppy
+
+    # Create a mesh grid of pixel coordinates
+    x_indices = np.tile(np.arange(width), height).reshape(height, width)
+    y_indices = np.repeat(np.arange(height), width).reshape(height, width)
+
+    # Get the depth values for each pixel
+    z = depth_frame * depth_scale  # Convert to meters
+
+    # Calculate the 3D coordinates using the pinhole camera model
+    x = (x_indices - ppx) * z / fx
+    y = (y_indices - ppy) * z / fy
+
+    # Combine X, Y, Z coordinates into a single point cloud
+    points = np.stack((x, y, z), axis=-1).reshape(-1, 3)
+    return points
+
+def get_point_cloud():
     frames = pipeline.wait_for_frames()
-    depth_frame = frames.get_depth_frame()
+    aligned_frames = align.process(frames)
+    depth_frame = aligned_frames.get_depth_frame()
+    color_frame = aligned_frames.get_color_frame()
 
-    if not is_raw:
-        depth_frame = threshold_filter.process(depth_frame)
-    depth_frame = decimate.process(depth_frame)
+    if not depth_frame or not color_frame:
+        return None, None, None
 
-    points = pc.calculate(depth_frame)
-    verts = np.asarray(points.get_vertices()).view(np.float32).reshape(-1, 3)
+    depth_image = np.asanyarray(depth_frame.get_data())
+    color_image = np.asanyarray(color_frame.get_data())
+    logger.info(f"Depth Image Shape: {depth_image.shape}, Color Image Shape: {color_image.shape}")
 
-    return verts
+    # Manually calculate the point cloud
+    verts = calculate_point_cloud(depth_image, depth_intrinsics)
 
-def cartesian_to_polar(x, y, z):
+    return verts, depth_image, color_image
+
+def cartesian_to_polar(x, y, z, isReverse=True):
     """Convert Cartesian coordinates to polar coordinates."""
+    if isReverse:
+        x, y, z = -x, -y, z
     range_ = np.sqrt(x**2 + y**2 + z**2)
-    azimuth = np.arctan2(x, z)
+    azimuth = np.arctan2(x, z)  # Azimuth remains in radians for polar plot
     return range_, azimuth
 
 if __name__ == '__main__':
-    
     if enable_visualization:
         # Set up the visualization figure and axes
         font_size = 64
@@ -219,15 +254,16 @@ if __name__ == '__main__':
             fps_radar = frame_count_radar / (current_time_radar - prev_time_radar)
             ntp_time_radar = datetime.datetime.now().strftime('%H:%M:%S.%f')
 
-        # Capture depth camera data
-        verts = get_point_cloud()
-        if verts.size == 0:
+        # Capture depth camera data using the new point cloud calculation
+        verts, depth_image, color_image = get_point_cloud()
+        if verts is None or depth_image is None or color_image is None:
             continue
+
         x, y, z = verts[:, 0], verts[:, 1], verts[:, 2]
-        range_cam, azimuth_cam = cartesian_to_polar(x, y, z)
+        range_cam, azimuth_cam = cartesian_to_polar(x, y, z, isReverse=isReverse)
 
         # Capture and process radar data
-        data_buf, loss_rate = dca.fastRead_in_Cpp(frame_num_in_buffer, sortInC=True, isLossReturn=True) # revise /mmwave/dataloader/adc.py Class DCA1000, line 
+        data_buf, loss_rate = dca.fastRead_in_Cpp(frame_num_in_buffer, sortInC=True, isLossReturn=True)
         if loss_rate != 0:
             logger.info("Skip this sample due to loss.")
             continue
@@ -286,30 +322,16 @@ if __name__ == '__main__':
             # Save the spectrum as an .npy file
             np.save('spectrum.npy', processed_data)
 
-            # Save the point cloud image as a PNG binary
-            fig4 = plt.figure(figsize=(10, 6))
-            ax4 = fig4.add_subplot(111)
-            ax4.scatter(range_cam, azimuth_cam_deg, s=1, c='black', label='Depth Camera')
-            ax4.set_xlim(0, depth_cam_config['max_range'])
-            ax4.set_ylim(-depth_cam_config['fov_azi'] / 2, depth_cam_config['fov_azi'] / 2)
+            # Prepare the dictionary to save as .pickle
+            ntp_time_filename = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+            filename = f'{volunteer_name}_{test_location}_{ntp_time_filename}'
 
-            # Remove ticks, labels, and titles
-            ax4.set_xticks([])
-            ax4.set_yticks([])
-            ax4.set_xlabel("")
-            ax4.set_ylabel("")
-            ax4.set_title("")
-
-            # Remove the axis boundaries (spines)
-            for spine in ax4.spines.values():
-                spine.set_visible(False)
-
-            # Save the point cloud image as a transparent PNG binary
-            buf = io.BytesIO()
-            fig4.savefig(buf, format='png', bbox_inches='tight', pad_inches=0, transparent=True)
-            buf.seek(0)
-            pointcloud_binary = buf.getvalue()
-            plt.close(fig4)
+            data_to_save = {
+                'spectrum': processed_data,
+                'raw_pointcloud': verts,
+                'depth_image': depth_image,
+                'color_image': color_image
+            }
 
             # Save the combined image as a PNG binary
             fig4 = plt.figure(figsize=(10, 6))
@@ -337,15 +359,8 @@ if __name__ == '__main__':
             combination_binary = buf.getvalue()
             plt.close(fig4)
 
-            # Prepare the dictionary to save as .pickle
-            ntp_time_filename = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-            filename = f'{volunteer_name}_{test_location}_{ntp_time_filename}'
-
-            data_to_save = {
-                'spectrum': processed_data,
-                'pointcloud': pointcloud_binary,
-                'combination': combination_binary
-            }
+            # Add the combination image to the pickle data
+            data_to_save['combination'] = combination_binary
 
             # Save the dictionary as a .pickle file
             with open(os.path.join(root_path, f'{filename}.pickle'), 'wb') as f:

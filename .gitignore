@@ -5,3 +5,6 @@ albertg_models
 logs
 __pycache__
 checkpoints
+yolov8_SAM/pretained_model
+yolov8_sam/pretrained_model/yolov8s.pt
+yolov8_sam/pretrained_model/sam_vit_h_4b8939.pth
