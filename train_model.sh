@@ -3,7 +3,7 @@
 # Training script for the LSSL model
 
 # Set default values for hyperparameters (you can change these if needed)
-DATASET_PATH="/data/lucayu/lss-cfar"
+DATASET_PATH="/data/lucayu/lss-cfar/dataset"
 NUM_LAYERS=8
 HIDDEN_DIM=256 #142
 ORDER=1
@@ -12,7 +12,7 @@ DT_MAX=8e-5
 CHANNELS=1
 DROPOUT=0.1
 LEARNING_RATE=1e-1
-BATCH_SIZE=4
+BATCH_SIZE=16
 NUM_WORKERS=4
 TOTAL_STEPS=10000
 WEIGHT_DECAY=1e-1

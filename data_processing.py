@@ -17,14 +17,17 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 
 class dataset_processing(Dataset):
-    def __init__(self, raw_dataset_path):
+    def __init__(self, raw_dataset_path, yolo_model, sam_model, sam_predictor):
         self.data_list = []
-        # read all *.pickle absolute filepath under raw_dataset_path
+        self.yolo_model = yolo_model
+        self.sam_model = sam_model
+        self.sam_predictor = sam_predictor
+        # Read all *.pickle absolute file paths under raw_dataset_path
         for root, dirs, files in os.walk(raw_dataset_path):
             for file in files:
                 if file.endswith('.pickle'):
                     self.data_list.append(os.path.join(root, file))
-        logger.info(f"Total {len(self.data_list)} files found in {raw_dataset_path}")    
+        logger.info(f"Total {len(self.data_list)} files found in {raw_dataset_path}")
 
     def __len__(self):
         return len(self.data_list)
@@ -62,34 +65,29 @@ class dataset_processing(Dataset):
         azimuth_deg = np.degrees(azimuth)
         return range_, azimuth, azimuth_deg
 
-    # YOLOv8 and SAM setup
-    def yolov8_detection(self, model, image):
-        results = model(image, stream=True)
+    def yolov8_detection(self, image):
+        results = self.yolo_model(image, stream=True)
+        person_boxes = []
         for result in results:
-            boxes = result.boxes
-        bbox = boxes.xyxy.tolist()
-        bbox = [[int(i) for i in box] for box in bbox]
-        return bbox
+            for box in result.boxes:
+                if box.cls.item() == 0:  # 0 is the class index for 'person'
+                    # Convert bounding box coordinates to integers
+                    person_boxes.append([int(coord) for coord in box.xyxy.tolist()[0]])
 
-    def segment_person(self, image, bbox, sam_checkpoint, model_type, device="cuda:0"):
+        return person_boxes
+
+    def segment_person(self, image, bbox):
         # Ensure the image is loaded correctly
         if image is None:
             raise ValueError("The image could not be loaded. Check the image path and format.")
 
-        # Verify image shape
-        if len(image.shape) != 3 or image.shape[2] != 3:
-            raise ValueError("The image does not have the correct shape. It should be a color image (HxWx3).")
+        # Set the image for SAM predictor
+        self.sam_predictor.set_image(image)
 
-        # Initialize SAM
-        sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
-        sam.to(device=device)
-        predictor = SamPredictor(sam)
-        predictor.set_image(image)
-        
         # Perform segmentation
-        input_boxes = torch.tensor(bbox, device=device)
-        transformed_boxes = predictor.transform.apply_boxes_torch(input_boxes, image.shape[:2])
-        masks, _, _ = predictor.predict_torch(
+        input_boxes = torch.tensor(bbox, device=self.sam_predictor.device)
+        transformed_boxes = self.sam_predictor.transform.apply_boxes_torch(input_boxes, image.shape[:2])
+        masks, _, _ = self.sam_predictor.predict_torch(
             point_coords=None,
             point_labels=None,
             boxes=transformed_boxes,
@@ -121,7 +119,6 @@ class dataset_processing(Dataset):
         verts_filtered = verts[mask_flat == 1]
         verts_background = verts[mask_flat == 0]  # Get the background point cloud
         return verts_filtered, verts_background
-
 
     def visualize_data(self, file_path, spectrum, raw_pointcloud, depth_image, color_image, combination):
         fig = plt.figure(figsize=(60, 30), constrained_layout=True)
@@ -162,15 +159,12 @@ class dataset_processing(Dataset):
         combination_img = plt.imread(io.BytesIO(combination), format='png')
         ax5.imshow(combination_img)
 
-        yolo_model_path = "/home/lucayu/lss-cfar/yolov8_sam/pretrained_model/yolov8s.pt"
-        sam_checkpoint = "/home/lucayu/lss-cfar/yolov8_sam/pretrained_model/sam_vit_h_4b8939.pth"
-        model_type = "vit_h"
-
-        # YOLOv8 model loading
-        model = YOLO(yolo_model_path)
+        bbox = self.yolov8_detection(color_image)
+        if not bbox:
+            logger.info(f"No person detected in {file_path}, skipping this sample.")
+            return None  # Skip this sample
         
-        bbox = self.yolov8_detection(model, color_image)
-        person_mask = self.segment_person(color_image, bbox, sam_checkpoint, model_type)
+        person_mask = self.segment_person(color_image, bbox)
 
         # Load a pre-recorded depth image
         depth_image = depth_image
@@ -266,7 +260,8 @@ class dataset_processing(Dataset):
         ax11.imshow(result, cmap='gray', origin='lower')
 
         # ax12: Spectrum Plot (with Overlaid Point Cloud)
-        ax12.imshow(spectrum, aspect='auto', cmap='viridis')
+        spectrum = np.flipud(spectrum)
+        ax12.imshow(spectrum, aspect='auto', cmap='viridis', alpha=0.5)
         ax12.imshow(result, origin='lower', alpha=0.5)
 
         plt.tight_layout()
@@ -291,15 +286,29 @@ class dataset_processing(Dataset):
         with open(save_processed_path, 'wb') as f:
             pickle.dump(result_processed, f)
 
+        plt.close(fig)
+
         # np.save(output_path_npy, result)
 
 
 if __name__ == "__main__":
     raw_dataset_path = '/data/lucayu/lss-cfar/raw_dataset/'
-    dataset = dataset_processing(raw_dataset_path)
-    # use DataLoader to load the dataset
-    dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
-    # use tqdm to show the progress
+
+    # Load the YOLO and SAM models only once
+    yolo_model_path = "/home/lucayu/lss-cfar/yolov8_sam/pretrained_model/yolov8s.pt"
+    sam_checkpoint = "/home/lucayu/lss-cfar/yolov8_sam/pretrained_model/sam_vit_h_4b8939.pth"
+    model_type = "vit_h"
+
+    # Initialize the models
+    yolo_model = YOLO(yolo_model_path)
+    sam_model = sam_model_registry[model_type](checkpoint=sam_checkpoint)
+    sam_predictor = SamPredictor(sam_model)
+
+    # Initialize the dataset and dataloader
+    dataset = dataset_processing(raw_dataset_path, yolo_model, sam_model, sam_predictor)
+    dataloader = DataLoader(dataset, batch_size=12, num_workers=0, shuffle=False)
+
+    # Use tqdm to show the progress
     for i, data in enumerate(tqdm(dataloader)):
         pass
-        # break
+

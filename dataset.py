@@ -16,19 +16,46 @@ class lsscfarDataset(Dataset):
         self.dataset_path = dataset_path
         data_path = f'{dataset_path}/{phase}'
         self.data_list += [f'{dataset_path}/{phase}/{data}' for data in os.listdir(data_path)]
+        self.calibration = True
 
     def __len__(self):
-        # logger.info(f'Dataset Loaded, Size: {len(self.data_list)}')
+        logger.info(f'Dataset Loaded, Size: {len(self.data_list)}')
         return len(self.data_list)
     
     def __getitem__(self, idx):
         data_path = self.data_list[idx]
         with open(data_path, 'rb') as f:
             data = pickle.load(f)
-        raw_pointcloud = data['pointcloud']
+        # raw_pointcloud = data['pointcloud']
         spectrum = torch.tensor(data['spectrum'], dtype=torch.float32)
-        pointcloud = self._pointcloud_process(raw_pointcloud, spectrum)
+        pointcloud = torch.tensor(data['pointcloud'], dtype=torch.float32)
+        # normalize the spectrum
+        if self.calibration:
+            # load the calibration data: /data/lucayu/lss-cfar/raw_dataset/luca_env_hw_101_2024-08-23_21-39-12.pickle
+            calibration_path = '/data/lucayu/lss-cfar/raw_dataset/luca_env_hw_101_2024-08-23_21-39-24.pickle'
+            with open(calibration_path, 'rb') as f:
+                calibration_data = pickle.load(f)
+            calibration_spectrum = torch.tensor(calibration_data['spectrum'], dtype=torch.float32)
+            # flip the calibration spectrum y-axis
+            calibration_spectrum = calibration_spectrum.flip(0)
+            # calibrate the spectrum by subtracting the calibration spectrum
+            spectrum = spectrum - calibration_spectrum
+
+            # for pointcloud, if calibration, set the 1 value to 0 then set 2 value to 1
+            pointcloud = torch.where(pointcloud == 1, torch.tensor(0), pointcloud)
+            pointcloud = torch.where(pointcloud == 2, torch.tensor(1), pointcloud)
+        
+        # normalize the spectrum
+        ############## do not normalize the spectrum
+        # spectrum = spectrum / spectrum.max()
+        # z-score normalization
+        # spectrum = (spectrum - spectrum.mean()) / spectrum.std()
+        # min-max normalization
+        # spectrum = (spectrum - spectrum.min()) / (spectrum.max() - spectrum.min())
+
+        # pointcloud = self._pointcloud_process(raw_pointcloud, spectrum)
         # logger.info(f'Pointcloud shape: {pointcloud.shape}')
+        
         # flatten the spectrum and pointcloud
         spectrum = spectrum.flatten()
         pointcloud = pointcloud.flatten()
