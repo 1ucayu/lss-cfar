@@ -4,25 +4,26 @@
 
 # Set default values for hyperparameters (you can change these if needed)
 DATASET_PATH="/data/lucayu/lss-cfar/dataset"
-NUM_LAYERS=8
+NUM_LAYERS=4
 HIDDEN_DIM=256 #142
-ORDER=1
+ORDER=256
 DT_MIN=1e-3
 DT_MAX=8e-5
 CHANNELS=1
 DROPOUT=0.1
-LEARNING_RATE=1e-1
-BATCH_SIZE=16
+LEARNING_RATE=1e-2
+BATCH_SIZE=4
 NUM_WORKERS=4
 TOTAL_STEPS=10000
 WEIGHT_DECAY=1e-1
 OPTIMIZER="AdamW"
-STEP_SIZE=100
+STEP_SIZE=300
 GAMMA=0.5
 SAVE_DIR="./checkpoints"
 VISUALIZATION_STRIDE=100
 GPUS="0"
 LOG_DIR="./logs"
+LOSS_TYPE="l1"
 
 # Run the training script
 python train_model.py \
@@ -45,4 +46,5 @@ python train_model.py \
   --save_dir $SAVE_DIR \
   --visualization_stride $VISUALIZATION_STRIDE \
   --gpus $GPUS \
-  --log_dir $LOG_DIR
+  --log_dir $LOG_DIR \
+  --loss_type $LOSS_TYPE

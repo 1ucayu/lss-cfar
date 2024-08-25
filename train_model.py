@@ -11,7 +11,8 @@ import datetime
 
 from model import LSSLModel
 from dataset import lsscfarDataset
-from loss import BCEWithLogitsLoss
+# from loss import BCEWithLogitsLoss
+from loss import CustomLoss
 from args import get_args  # Importing the argument parser
 
 def generate_checkpoint_name(args):
@@ -22,21 +23,23 @@ def generate_checkpoint_name(args):
         f"model_layers_{args.num_layers}_hidden_{args.hidden_dim}_order_{args.order}_"
         f"dtmin_{args.dt_min}_dtmax_{args.dt_max}_channels_{args.channels}_dropout_{args.dropout}_"
         f"lr_{args.learning_rate}_batch_{args.batch_size}_steps_{args.total_steps}_"
-        f"optimizer_{args.optimizer}_decay_{args.weight_decay}_step_{args.step_size}_gamma_{args.gamma}"
+        f"optimizer_{args.optimizer}_decay_{args.weight_decay}_step_{args.step_size}_gamma_{args.gamma}_losstype_{args.loss_type}"
     )
 
 def visualize_result(spectrum, pointcloud_pred, pointcloud_gt, writer, step):
     idx = np.random.randint(0, spectrum.shape[1])  # Randomly select one from the batch
-    spectrum_np = spectrum[:, idx].squeeze().cpu().view(87, 142).numpy()
-    pointcloud_pred_np = pointcloud_pred[:, idx].squeeze().detach().cpu().view(87, 142).numpy()  # Detach before converting to NumPy
-    pointcloud_gt_np = pointcloud_gt[:, idx].squeeze().cpu().view(87, 142).numpy()
+    spectrum_np = spectrum[:, idx].squeeze().cpu().view(87, 128).numpy()
+    pointcloud_pred_np = pointcloud_pred[:, idx].squeeze().detach().cpu().view(87, 128).numpy()  # Detach before converting to NumPy
+    pointcloud_gt_np = pointcloud_gt[:, idx].squeeze().cpu().view(87, 128).numpy()
 
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
 
-    axes[0].imshow(spectrum_np, cmap='viridis', aspect='auto', alpha=0.5)
+    axes[0].imshow(spectrum_np, cmap='viridis', aspect='auto')
     axes[0].set_title('Spectrum')
     
-    axes[1].imshow(pointcloud_pred_np, cmap='gray', aspect='auto')
+    # show the higher 0.5 value of the pointcloud_pred_np
+    # pointcloud_pred_np = (pointcloud_pred_np > 0.5).astype(np.float32)
+    axes[1].imshow(pointcloud_pred_np, cmap='viridis', aspect='auto')
     axes[1].set_title('Predicted Pointcloud')
     
     axes[2].imshow(pointcloud_gt_np, cmap='gray', aspect='auto')
@@ -82,7 +85,8 @@ def train():
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers, collate_fn=val_dataset._collate_fn)
 
     # Loss and optimizer
-    criterion = BCEWithLogitsLoss().to(device)
+    # criterion = BCEWithLogitsLoss().to(device)
+    criterion = CustomLoss(loss_type=args.loss_type).to(device)
     optimizer = getattr(torch.optim, args.optimizer)(
         model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
     )
@@ -135,7 +139,7 @@ def train():
                 else:
                     with torch.no_grad():
                         pointcloud_pred = model(spectrum)
-                        pointcloud_pred = (pointcloud_pred > 0.5).float()  # Binarize the prediction
+                        # pointcloud_pred = (pointcloud_pred > 0.5).float()  # Binarize the prediction
                         loss = criterion(pointcloud_pred, pointcloud_gt)
                         accumulated_test_loss += loss.item()
                         num_test_steps += 1

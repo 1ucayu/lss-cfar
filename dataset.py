@@ -17,6 +17,20 @@ class lsscfarDataset(Dataset):
         data_path = f'{dataset_path}/{phase}'
         self.data_list += [f'{dataset_path}/{phase}/{data}' for data in os.listdir(data_path)]
         self.calibration = True
+        if self.calibration:
+            logger.info('Calibration mode enabled')
+            calibration_path = '/data/lucayu/lss-cfar/raw_dataset/env'
+            calibration_files = os.listdir(calibration_path)
+            calibration_spectrum = torch.zeros(87, 128)
+            for calibration_file in calibration_files:
+                with open(f'{calibration_path}/{calibration_file}', 'rb') as f:
+                    calibration_data = pickle.load(f)
+                calibration_data = calibration_data['spectrum']
+                calibration_data = torch.tensor(calibration_data, dtype=torch.float32).flip(0)
+                calibration_data = calibration_data[:,14:]
+                calibration_spectrum += torch.tensor(calibration_data, dtype=torch.float32)
+            calibration_spectrum = calibration_spectrum / len(calibration_files)
+            self.calibration_spectrum = calibration_spectrum
 
     def __len__(self):
         logger.info(f'Dataset Loaded, Size: {len(self.data_list)}')
@@ -29,20 +43,16 @@ class lsscfarDataset(Dataset):
         # raw_pointcloud = data['pointcloud']
         spectrum = torch.tensor(data['spectrum'], dtype=torch.float32)
         pointcloud = torch.tensor(data['pointcloud'], dtype=torch.float32)
+        spectrum = spectrum[:, 14:]
+        pointcloud = pointcloud[:, 14:]
         # normalize the spectrum
         if self.calibration:
-            # load the calibration data: /data/lucayu/lss-cfar/raw_dataset/luca_env_hw_101_2024-08-23_21-39-12.pickle
-            calibration_path = '/data/lucayu/lss-cfar/raw_dataset/luca_env_hw_101_2024-08-23_21-39-24.pickle'
-            with open(calibration_path, 'rb') as f:
-                calibration_data = pickle.load(f)
-            calibration_spectrum = torch.tensor(calibration_data['spectrum'], dtype=torch.float32)
-            # flip the calibration spectrum y-axis
-            calibration_spectrum = calibration_spectrum.flip(0)
-            # calibrate the spectrum by subtracting the calibration spectrum
-            spectrum = spectrum - calibration_spectrum
+            # spectrum = spectrum / calibration_spectrum    # do not use divison calibration
+            spectrum = spectrum - self.calibration_spectrum
 
             # for pointcloud, if calibration, set the 1 value to 0 then set 2 value to 1
             pointcloud = torch.where(pointcloud == 1, torch.tensor(0), pointcloud)
+            # pointcloud = torch.where(pointcloud == 0, torch.tensor(-1), pointcloud)
             pointcloud = torch.where(pointcloud == 2, torch.tensor(1), pointcloud)
         
         # normalize the spectrum
@@ -55,6 +65,14 @@ class lsscfarDataset(Dataset):
 
         # pointcloud = self._pointcloud_process(raw_pointcloud, spectrum)
         # logger.info(f'Pointcloud shape: {pointcloud.shape}')
+        
+        ############## reverse the spectrum to test
+        # spectrum = spectrum.transpose(0, -1)
+        # pointcloud = pointcloud.transpose(0, -1)
+
+        ############## remove the first 14 bins in the second dimension
+        ############## because the min depth of the pointcloud is 0.6m
+        
         
         # flatten the spectrum and pointcloud
         spectrum = spectrum.flatten()
@@ -82,7 +100,7 @@ class lsscfarDataset(Dataset):
 
 # Test function
 def test():
-    dataset_path = '/data/lucayu/lss-cfar'
+    dataset_path = '/data/lucayu/lss-cfar/dataset'
     phase = 'train'
     dataset = lsscfarDataset(phase, dataset_path)
     dataloader = DataLoader(dataset, batch_size=4, shuffle=True, collate_fn=dataset._collate_fn)  # Adjust batch size as needed

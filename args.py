@@ -24,6 +24,7 @@ def get_args():
     parser.add_argument('--step_size', type=int, default=300, help='Scheduler step size')
     parser.add_argument('--gamma', type=float, default=0.1, help='Scheduler gamma')
     parser.add_argument('--save_dir', type=str, default='./checkpoints', help='Directory to save model checkpoints')
+    parser.add_argument('--loss_type', type=str, default='bce', help='Loss function type')
 
     # Other configurations
     parser.add_argument('--gpus', type=str, default='0', help='GPU IDs to use, e.g., "0,1"')

@@ -274,16 +274,41 @@ class LSSLModel(nn.Module):
             StateSpace(d, order, dt_min, dt_max, channels, dropout) for _ in range(num_layers)
         ])
         self.norms = nn.ModuleList([nn.LayerNorm(d) for _ in range(num_layers)])
+        self.output_norms = nn.LayerNorm(d)
         self.fc = nn.Linear(d, 1)
 
     def forward(self, x):
+        # clone the input tensor without expanding
+        x_init = x.clone()
         x = x.unsqueeze(-1).expand(-1, -1, self.d)
         for layer, norm in zip(self.layers, self.norms):
             x = x + layer(norm(x))  # Residual connection
-        # x = self.fc(x).squeeze(-1)
         x = x.mean(dim=-1)
-        # logger.info(x)
+        # logger.debug(f"Output: {x}")
+        # check whether the output is nan
+        # logger.debug(f"Output: {torch.isnan(x).any()}")
+        # x = self.output_norms(x)
+        # x = self.fc(x).squeeze(-1)
+        # logger.debug(f"Output: {x}")
+        # logger.debug(f"Output: {torch.isnan(x).any()}")
+        # x = torch.sigmoid(x)
+        # x = torch.clamp(x, min=-15.0, max=15.0)
+        # hardama product x and x_init
         x = F.sigmoid(x)
+
+        x = x * x_init
+
+        max_val = x.max(dim=-1, keepdim=True)[0]
+        threshold = 0.99 * max_val
+        x = torch.where(x >= threshold, x, torch.zeros_like(x))
+        # x = F.relu(x)
+        # logger.debug(f"Output: {x}")
+        # choose the max value in the last dimension
+        # x = x.max(dim=-1)[0]
+        # logger.info(x)
+        # x = F.sigmoid(x)
+        # x = F.relu(x-0.5)
+        # x = F.relu(x)
         return x
 
 def count_parameters(model):
@@ -293,9 +318,9 @@ def count_parameters(model):
 
 
 if __name__ == "__main__":
-    num_layers = 8  # Example number of layers
+    num_layers = 4  # Example number of layers
     # d: hidden states, H; order: state space order, N; channels: M
-    model = LSSLModel(num_layers, d=256, order=1, dt_min=1e-3, dt_max=1e-1, channels=1, dropout=0.1)
+    model = LSSLModel(num_layers, d=1024, order=10, dt_min=1e-3, dt_max=1e-1, channels=1, dropout=0.1)
 
     input_tensor = torch.randn(87*142, 4)  # (sequence_length, batch_size, hidden_dimension)
     output = model(input_tensor)
