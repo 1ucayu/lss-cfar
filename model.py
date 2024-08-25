@@ -320,7 +320,7 @@ def count_parameters(model):
 if __name__ == "__main__":
     num_layers = 4  # Example number of layers
     # d: hidden states, H; order: state space order, N; channels: M
-    model = LSSLModel(num_layers, d=1024, order=10, dt_min=1e-3, dt_max=1e-1, channels=1, dropout=0.1)
+    model = LSSLModel(num_layers, d=256, order=256, dt_min=1e-3, dt_max=1e-1, channels=1, dropout=0.1)
 
     input_tensor = torch.randn(87*142, 4)  # (sequence_length, batch_size, hidden_dimension)
     output = model(input_tensor)

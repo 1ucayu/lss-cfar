@@ -5,7 +5,6 @@ import os
 import io
 import pickle
 from PIL import Image
-import tqdm
 from torch.utils.data import DataLoader, Dataset
 
 
@@ -84,12 +83,12 @@ class lsscfarDataset(Dataset):
         }
         return result
     
-    def _pointcloud_process(self, pointcloud, spectrum):
-        pointcloud = Image.open(io.BytesIO(pointcloud))
-        pointcloud = pointcloud.resize((spectrum.shape[1], spectrum.shape[0]))
-        pointcloud = torch.from_numpy(np.array(pointcloud)).float()
-        pointcloud = (pointcloud[:, :, 3] > 0).float()  # > / == debug here
-        return pointcloud
+    # def _pointcloud_process(self, pointcloud, spectrum):
+    #     pointcloud = Image.open(io.BytesIO(pointcloud))
+    #     pointcloud = pointcloud.resize((spectrum.shape[1], spectrum.shape[0]))
+    #     pointcloud = torch.from_numpy(np.array(pointcloud)).float()
+    #     pointcloud = (pointcloud[:, :, 3] > 0).float()  # > / == debug here
+    #     return pointcloud
 
     def _collate_fn(self, batch):
         # Stack pointclouds along the batch dimension (second dimension)
