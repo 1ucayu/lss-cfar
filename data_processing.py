@@ -333,9 +333,9 @@ class dataset_processing(Dataset):
 
 
 if __name__ == "__main__":
-    raw_dataset_path = '/data/lucayu/lss-cfar/raw_dataset/lucacx_corridor_2024-08-27'
-    save_processed_folder_path = '/data/lucayu/lss-cfar/dataset/lucacx_corridor_2024-08-27'
-    save_processed_save_visualization_folder = '/data/lucayu/lss-cfar/dataset_visualization/lucacx_corridor_2024-08-27'
+    raw_dataset_path = '/data/lucayu/lss-cfar/raw_dataset/cx_corridor_2024-08-27'
+    save_processed_folder_path = '/data/lucayu/lss-cfar/dataset/cx_corridor_2024-08-27'
+    save_processed_save_visualization_folder = '/data/lucayu/lss-cfar/dataset_visualization/cx_corridor_2024-08-27'
 
     # Load the YOLO and SAM models only once
     yolo_model_path = "/home/lucayu/lss-cfar/yolov8_sam/pretrained_model/yolov8s.pt"

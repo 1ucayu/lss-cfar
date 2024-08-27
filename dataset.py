@@ -18,7 +18,7 @@ class lsscfarDataset(Dataset):
         self.calibration = True
         if self.calibration:
             logger.info('Calibration mode enabled')
-            calibration_path = '/data/lucayu/lss-cfar/raw_dataset/env'
+            calibration_path = '/data/lucayu/lss-cfar/raw_dataset/lucacx_env_corridor_2024-08-27'
             calibration_files = os.listdir(calibration_path)
             calibration_spectrum = torch.zeros(87, 128)
             for calibration_file in calibration_files:
@@ -99,7 +99,7 @@ class lsscfarDataset(Dataset):
 
 # Test function
 def test():
-    dataset_path = '/data/lucayu/lss-cfar/dataset'
+    dataset_path = '/data/lucayu/lss-cfar/dataset/lucacx_corridor_2024-08-27'
     phase = 'train'
     dataset = lsscfarDataset(phase, dataset_path)
     dataloader = DataLoader(dataset, batch_size=4, shuffle=True, collate_fn=dataset._collate_fn)  # Adjust batch size as needed

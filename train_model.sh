@@ -3,7 +3,7 @@
 # Training script for the LSSL model
 
 # Set default values for hyperparameters (you can change these if needed)
-DATASET_PATH="/data/lucayu/lss-cfar/dataset"
+DATASET_PATH="/data/lucayu/lss-cfar/dataset/lucacx_corridor_2024-08-27"
 NUM_LAYERS=4
 HIDDEN_DIM=256 #142
 ORDER=256
@@ -23,7 +23,7 @@ SAVE_DIR="./checkpoints"
 VISUALIZATION_STRIDE=100
 GPUS="0"
 LOG_DIR="./logs"
-LOSS_TYPE="l1"
+LOSS_TYPE="bce"
 
 # Run the training script
 python train_model.py \

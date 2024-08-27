@@ -298,9 +298,9 @@ class LSSLModel(nn.Module):
 
         x = x * x_init
 
-        max_val = x.max(dim=-1, keepdim=True)[0]
-        threshold = 0.99 * max_val
-        x = torch.where(x >= threshold, x, torch.zeros_like(x))
+        # max_val = x.max(dim=-1, keepdim=True)[0]
+        # threshold = 0.6 * max_val
+        # x = torch.where(x >= threshold, x, torch.zeros_like(x))
         # x = F.relu(x)
         # logger.debug(f"Output: {x}")
         # choose the max value in the last dimension
