@@ -17,11 +17,13 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 
 class dataset_processing(Dataset):
-    def __init__(self, raw_dataset_path, yolo_model, sam_model, sam_predictor):
+    def __init__(self, raw_dataset_path, yolo_model, sam_model, sam_predictor, save_processed_folder_path, save_processed_save_visualization_folder):
         self.data_list = []
         self.yolo_model = yolo_model
         self.sam_model = sam_model
         self.sam_predictor = sam_predictor
+        self.save_processed_folder_path = save_processed_folder_path
+        self.save_processed_save_visualization_folder = save_processed_save_visualization_folder
         # Read all *.pickle absolute file paths under raw_dataset_path
         for root, dirs, files in os.walk(raw_dataset_path):
             for file in files:
@@ -35,7 +37,7 @@ class dataset_processing(Dataset):
     def __getitem__(self, idx):
         sample_path = self.data_list[idx]
         spectrum, raw_pointcloud, depth_image, color_image, combination = self.load_pickle(sample_path)
-        self.visualize_data(sample_path, spectrum, raw_pointcloud, depth_image, color_image, combination)
+        self.visualize_data(sample_path, spectrum, raw_pointcloud, depth_image, color_image, combination, self.save_processed_folder_path, self.save_processed_save_visualization_folder)
         return 0
 
     def load_pickle(self, file_path):
@@ -56,7 +58,7 @@ class dataset_processing(Dataset):
 
     def cartesian_to_polar(self, x, y, z):
         """Convert Cartesian coordinates to polar coordinates for point cloud."""
-        range_ = np.sqrt(x**2 + y**2 + z**2)
+        range_ = np.sqrt(x**2 + z**2)
         azimuth = np.arctan2(-x, z)  # Azimuth remains in radians for polar plot
 
         mask = (range_ >= 0) & (range_ <= 6)  # Adjust based on your setup's max range
@@ -65,6 +67,16 @@ class dataset_processing(Dataset):
         azimuth_deg = np.degrees(azimuth)
         return range_, azimuth, azimuth_deg
 
+    # def yolov8_detection(self, image):
+    #     results = self.yolo_model(image, stream=True)
+    #     person_boxes = []
+    #     for result in results:
+    #         for box in result.boxes:
+    #             if box.cls.item() == 0:  # 0 is the class index for 'person'
+    #                 # Convert bounding box coordinates to integers
+    #                 person_boxes.append([int(coord) for coord in box.xyxy.tolist()[0]])
+
+    #     return person_boxes
     def yolov8_detection(self, image):
         results = self.yolo_model(image, stream=True)
         person_boxes = []
@@ -74,9 +86,28 @@ class dataset_processing(Dataset):
                     # Convert bounding box coordinates to integers
                     person_boxes.append([int(coord) for coord in box.xyxy.tolist()[0]])
 
-        return person_boxes
+        return person_boxes  # Return all bounding boxes for persons
 
-    def segment_person(self, image, bbox):
+
+    # def segment_person(self, image, bbox):
+    #     # Ensure the image is loaded correctly
+    #     if image is None:
+    #         raise ValueError("The image could not be loaded. Check the image path and format.")
+
+    #     # Set the image for SAM predictor
+    #     self.sam_predictor.set_image(image)
+
+    #     # Perform segmentation
+    #     input_boxes = torch.tensor(bbox, device=self.sam_predictor.device)
+    #     transformed_boxes = self.sam_predictor.transform.apply_boxes_torch(input_boxes, image.shape[:2])
+    #     masks, _, _ = self.sam_predictor.predict_torch(
+    #         point_coords=None,
+    #         point_labels=None,
+    #         boxes=transformed_boxes,
+    #         multimask_output=False,
+    #     )
+    #     return masks[0].squeeze().cpu().numpy()
+    def segment_person(self, image, bboxes):
         # Ensure the image is loaded correctly
         if image is None:
             raise ValueError("The image could not be loaded. Check the image path and format.")
@@ -84,16 +115,26 @@ class dataset_processing(Dataset):
         # Set the image for SAM predictor
         self.sam_predictor.set_image(image)
 
-        # Perform segmentation
-        input_boxes = torch.tensor(bbox, device=self.sam_predictor.device)
-        transformed_boxes = self.sam_predictor.transform.apply_boxes_torch(input_boxes, image.shape[:2])
-        masks, _, _ = self.sam_predictor.predict_torch(
-            point_coords=None,
-            point_labels=None,
-            boxes=transformed_boxes,
-            multimask_output=False,
-        )
-        return masks[0].squeeze().cpu().numpy()
+        # Perform segmentation for all bounding boxes
+        masks_combined = None
+        for bbox in bboxes:
+            input_boxes = torch.tensor([bbox], device=self.sam_predictor.device)  # Convert bbox to tensor
+            transformed_boxes = self.sam_predictor.transform.apply_boxes_torch(input_boxes, image.shape[:2])
+            masks, _, _ = self.sam_predictor.predict_torch(
+                point_coords=None,
+                point_labels=None,
+                boxes=transformed_boxes,
+                multimask_output=False,
+            )
+            person_mask = masks[0].squeeze().cpu().numpy()
+
+            if masks_combined is None:
+                masks_combined = person_mask
+            else:
+                masks_combined = np.maximum(masks_combined, person_mask)  # Combine masks from multiple persons
+
+        return masks_combined
+
 
     def calculate_point_cloud(self, depth_frame, intrinsics, depth_scale):
         height, width = depth_frame.shape
@@ -120,7 +161,7 @@ class dataset_processing(Dataset):
         verts_background = verts[mask_flat == 0]  # Get the background point cloud
         return verts_filtered, verts_background
 
-    def visualize_data(self, file_path, spectrum, raw_pointcloud, depth_image, color_image, combination):
+    def visualize_data(self, file_path, spectrum, raw_pointcloud, depth_image, color_image, combination, save_processed_folder_path, save_processed_save_visualization_folder):
         fig = plt.figure(figsize=(60, 30), constrained_layout=True)
 
         ax1 = fig.add_subplot(2, 6, 1)
@@ -167,7 +208,6 @@ class dataset_processing(Dataset):
         person_mask = self.segment_person(color_image, bbox)
 
         # Load a pre-recorded depth image
-        depth_image = depth_image
         depth_image = depth_image.astype(np.float32)  # Convert to float32 for scaling
 
         # Manually set the depth camera intrinsics and scale
@@ -238,8 +278,6 @@ class dataset_processing(Dataset):
         filename = os.path.basename(file_path)
         logger.info(f"filename: {filename}")
 
-        output_path_png = '/home/lucayu/lss-cfar/data_collection/point_cloud.png'
-        output_path_npy = '/home/lucayu/lss-cfar/data_collection/point_cloud.npy'
         # save_pointcloud_as_npy(range_background, azimuth_background_deg, range_filtered, azimuth_filtered_deg, spectrum.shape, output_path_png, output_path_npy)
 
         spectrum_shape = spectrum.shape
@@ -267,7 +305,8 @@ class dataset_processing(Dataset):
         plt.tight_layout()
         plt.show()
 
-        save_processed_path = '/data/lucayu/lss-cfar/dataset_visualization/'+filename.replace('.pickle', '.png')
+        save_processed_path =  save_processed_save_visualization_folder + '/' + filename.replace('.pickle', '.png')
+        # save_processed_path = '/data/lucayu/lss-cfar/dataset_visualization/'+filename.replace('.pickle', '.png')
         plt.savefig(save_processed_path)
 
         # Save the scatter plot as a PNG file
@@ -282,7 +321,9 @@ class dataset_processing(Dataset):
         }
 
         # save the result as a pickle file
-        save_processed_path = '/data/lucayu/lss-cfar/dataset/'+filename
+        # save_processed_path = '/data/lucayu/lss-cfar/dataset/'+filename
+        save_processed_path = save_processed_folder_path + '/' + filename
+
         with open(save_processed_path, 'wb') as f:
             pickle.dump(result_processed, f)
 
@@ -292,7 +333,9 @@ class dataset_processing(Dataset):
 
 
 if __name__ == "__main__":
-    raw_dataset_path = '/data/lucayu/lss-cfar/raw_dataset/'
+    raw_dataset_path = '/data/lucayu/lss-cfar/raw_dataset/lucacx_corridor_2024-08-27'
+    save_processed_folder_path = '/data/lucayu/lss-cfar/dataset/lucacx_corridor_2024-08-27'
+    save_processed_save_visualization_folder = '/data/lucayu/lss-cfar/dataset_visualization/lucacx_corridor_2024-08-27'
 
     # Load the YOLO and SAM models only once
     yolo_model_path = "/home/lucayu/lss-cfar/yolov8_sam/pretrained_model/yolov8s.pt"
@@ -305,7 +348,7 @@ if __name__ == "__main__":
     sam_predictor = SamPredictor(sam_model)
 
     # Initialize the dataset and dataloader
-    dataset = dataset_processing(raw_dataset_path, yolo_model, sam_model, sam_predictor)
+    dataset = dataset_processing(raw_dataset_path, yolo_model, sam_model, sam_predictor, save_processed_folder_path, save_processed_save_visualization_folder)
     dataloader = DataLoader(dataset, batch_size=12, num_workers=0, shuffle=False)
 
     # Use tqdm to show the progress

@@ -10,6 +10,8 @@ from torch.utils.data import DataLoader, Dataset
 from model import LSSLModel
 from args import get_args
 from tqdm import tqdm
+from sklearn.cluster import DBSCAN
+
 class evaluator(Dataset):
 
     def __init__(self, phase, dataset_path, checkpoint_path):
@@ -21,7 +23,7 @@ class evaluator(Dataset):
         self.calibration = True
         if self.calibration:
             logger.info('Calibration mode enabled')
-            calibration_path = '/data/lucayu/lss-cfar/raw_dataset/env'
+            calibration_path = '/data/lucayu/lss-cfar/raw_dataset/luca_env_hw_101_2024_08-23'
             calibration_files = os.listdir(calibration_path)
             calibration_spectrum = torch.zeros(87, 128)
             for calibration_file in calibration_files:
@@ -62,11 +64,139 @@ class evaluator(Dataset):
         return len(self.data_list)
     
 
+    # def __getitem__(self, idx):
+    #     pickle_path = self.data_list[idx]
+    #     with open(pickle_path, 'rb') as f:
+    #         data = pickle.load(f)
+        
+    #     spectrum = torch.tensor(data['spectrum'], dtype=torch.float32)
+    #     pointcloud = torch.tensor(data['pointcloud'], dtype=torch.float32)
+    #     spectrum = spectrum[:, 14:]
+    #     pointcloud = pointcloud[:, 14:]
+
+    #     if self.calibration:
+    #         spectrum = spectrum - self.calibration_spectrum
+    #         pointcloud = torch.where(pointcloud == 1, torch.tensor(0), pointcloud)
+    #         pointcloud = torch.where(pointcloud == 2, torch.tensor(1), pointcloud)
+
+    #     # input preparation
+    #     spectrum = spectrum.flatten()
+    #     pointcloud = pointcloud.flatten()
+
+    #     with torch.no_grad():
+    #         spectrum_input = spectrum.unsqueeze(0)
+    #         spectrum_input = spectrum_input.to(self.device)
+    #         pointcloud_pred = self.model(spectrum_input)
+
+    #     pointcloud_pred_np = pointcloud_pred.squeeze().detach().cpu().view(87, 128).numpy()
+    #     pointcloud_gt_np = pointcloud.view(87, 128).numpy()
+    #     spectrum_np = spectrum.view(87, 128).numpy()
+        
+    #     # Finding the bounding box of the maximum closure of 1s in pointcloud_gt_np
+    #     # bbox = self.find_max_closure_bbox(pointcloud_gt_np)
+        
+    #     # # Extend the bounding box based on azimuth intervals
+    #     # if bbox:
+    #     #     bbox = self.extend_bbox_to_azimuth_intervals(bbox)
+    #     # Finding the two largest closures (bounding boxes) in the ground truth
+
+    #     largest_bbox, second_largest_bbox = self.find_two_largest_closures(pointcloud_gt_np)
+
+    #     # Extend the bounding boxes based on azimuth intervals
+    #     if largest_bbox:
+    #         largest_bbox = self.extend_bbox_to_azimuth_intervals(largest_bbox)
+    #     if second_largest_bbox:
+    #         # Extend the second largest azimuth using the largest_bbox's azimuth range
+    #         r1, c1, r2, c2 = largest_bbox[0].start, largest_bbox[1].start, largest_bbox[0].stop, largest_bbox[1].stop
+    #         second_largest_bbox = (slice(second_largest_bbox[0].start, second_largest_bbox[0].stop), slice(c1, c2))
+
+    #     # Combine both bounding boxes into a list for easier handling
+    #     bboxes = [largest_bbox, second_largest_bbox] if second_largest_bbox else [largest_bbox]
+
+        
+    #     # Find the maximum value in pointcloud_pred_np and its position
+    #     # max_value = np.max(pointcloud_pred_np)
+    #     # max_position = np.unravel_index(np.argmax(pointcloud_pred_np), pointcloud_pred_np.shape)
+    #     points = np.column_stack(np.nonzero(pointcloud_pred_np > 0))
+    #     clustering = DBSCAN(eps=3, min_samples=5).fit(points)
+    #     max_value = np.max(pointcloud_pred_np)
+    #     max_position = np.unravel_index(np.argmax(pointcloud_pred_np), pointcloud_pred_np.shape)
+    #     max_cluster_label = clustering.labels_[np.where((points == max_position).all(axis=1))[0][0]]
+
+    #     cluster_points = points[clustering.labels_ == max_cluster_label]
+    #     centroid = cluster_points.mean(axis=0).astype(int)
+    #     max_position = (centroid[0], centroid[1])
+
+    #     logger.info(f'Maximum value in prediction: {max_value} at position: {max_position}')
+
+    #     # Check if the max_position is inside the extended ground truth bounding box
+    #     inside_bbox = False
+    #     # if bbox:
+    #     #     r1, c1, r2, c2 = bbox[0].start, bbox[1].start, bbox[0].stop, bbox[1].stop
+    #     #     inside_bbox = (r1 <= max_position[0] < r2) and (c1 <= max_position[1] < c2)
+    #     #     logger.info(f'Is the maximum value inside the bounding box? {"Yes" if inside_bbox else "No"}')
+    #     # else:
+    #     #     logger.info("No bounding box found.")
+    #     # Draw bounding boxes for both the largest and second-largest closures
+    #     colors = ['red', 'blue']  # Different colors for the bounding boxes
+    #     for i, bbox in enumerate(bboxes):
+    #         if bbox:
+    #             r1, c1, r2, c2 = bbox[0].start, bbox[1].start, bbox[0].stop, bbox[1].stop
+    #             rect = patches.Rectangle((c1, r1), c2 - c1, r2 - r1, linewidth=2, edgecolor=colors[i], facecolor='none')
+    #             axes[2].add_patch(rect)
+
+
+    #     # Accumulate the statistics for the full dataset
+    #     self.total_gt_positives += np.sum(pointcloud_gt_np == 1)  # Ground truth positives
+    #     if inside_bbox:
+    #         self.total_true_positives += 1  # True positive if max_position is inside the bbox
+    #     else:
+    #         self.total_false_positives += 1  # False positive if max_position is outside the bbox
+
+    #     self.total_predicted_positives += 1  # Count this prediction for false alarm calculation
+
+    #     # Visualization code (unchanged)
+    #     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+
+    #     axes[0].imshow(spectrum_np, cmap='viridis', aspect='auto')
+    #     axes[0].set_title('Spectrum')
+
+    #     axes[1].imshow(pointcloud_pred_np, cmap='viridis', aspect='auto')
+    #     axes[1].set_title('Predicted Pointcloud')
+
+    #     axes[2].imshow(pointcloud_gt_np, cmap='gray', aspect='auto')
+    #     axes[2].set_title('Ground Truth Pointcloud')
+
+    #     # If a bounding box was found, draw it on the Ground Truth Pointcloud
+    #     if bbox:
+    #         r1, c1, r2, c2 = bbox[0].start, bbox[1].start, bbox[0].stop, bbox[1].stop
+    #         rect = patches.Rectangle((c1, r1), c2 - c1, r2 - r1, linewidth=2, edgecolor='red', facecolor='none')
+    #         axes[2].add_patch(rect)
+
+    #     # Draw the maximum value position
+    #     axes[2].plot(max_position[1], max_position[0], 'bo', markersize=8, label='Max Value')
+
+    #     # Add a legend to indicate the maximum value
+    #     axes[2].legend()
+
+    #     # Save the figure to the given folder path with an automatic name
+    #     save_folder = '/data/lucayu/lss-cfar/evaluation_visualization'
+    #     os.makedirs(save_folder, exist_ok=True)
+    #     file_name = f'sample_{idx:04d}.png'
+    #     save_path = os.path.join(save_folder, file_name)
+    #     fig.savefig(save_path)
+
+    #     logger.info(f'Visualization saved to {save_path}')
+
+    #     plt.close(fig)  # Close the figure to free memory
+
+    #     return 0
+
     def __getitem__(self, idx):
         pickle_path = self.data_list[idx]
         with open(pickle_path, 'rb') as f:
             data = pickle.load(f)
-        
+
         spectrum = torch.tensor(data['spectrum'], dtype=torch.float32)
         pointcloud = torch.tensor(data['pointcloud'], dtype=torch.float32)
         spectrum = spectrum[:, 14:]
@@ -89,39 +219,22 @@ class evaluator(Dataset):
         pointcloud_pred_np = pointcloud_pred.squeeze().detach().cpu().view(87, 128).numpy()
         pointcloud_gt_np = pointcloud.view(87, 128).numpy()
         spectrum_np = spectrum.view(87, 128).numpy()
-        
-        # Finding the bounding box of the maximum closure of 1s in pointcloud_gt_np
-        bbox = self.find_max_closure_bbox(pointcloud_gt_np)
-        
-        # Extend the bounding box based on azimuth intervals
-        if bbox:
-            bbox = self.extend_bbox_to_azimuth_intervals(bbox)
-        
-        # Find the maximum value in pointcloud_pred_np and its position
-        max_value = np.max(pointcloud_pred_np)
-        max_position = np.unravel_index(np.argmax(pointcloud_pred_np), pointcloud_pred_np.shape)
 
-        logger.info(f'Maximum value in prediction: {max_value} at position: {max_position}')
+        # Finding the two largest closures (bounding boxes) in the ground truth
+        largest_bbox, second_largest_bbox = self.find_two_largest_closures(pointcloud_gt_np)
 
-        # Check if the max_position is inside the extended ground truth bounding box
-        inside_bbox = False
-        if bbox:
-            r1, c1, r2, c2 = bbox[0].start, bbox[1].start, bbox[0].stop, bbox[1].stop
-            inside_bbox = (r1 <= max_position[0] < r2) and (c1 <= max_position[1] < c2)
-            logger.info(f'Is the maximum value inside the bounding box? {"Yes" if inside_bbox else "No"}')
-        else:
-            logger.info("No bounding box found.")
+        # Extend the bounding boxes based on azimuth intervals
+        if largest_bbox:
+            largest_bbox = self.extend_bbox_to_azimuth_intervals(largest_bbox)
+        if second_largest_bbox:
+            # Extend the second largest azimuth using the largest_bbox's azimuth range
+            r1, c1, r2, c2 = largest_bbox[0].start, largest_bbox[1].start, largest_bbox[0].stop, largest_bbox[1].stop
+            second_largest_bbox = (slice(second_largest_bbox[0].start, second_largest_bbox[0].stop), slice(c1, c2))
 
-        # Accumulate the statistics for the full dataset
-        self.total_gt_positives += np.sum(pointcloud_gt_np == 1)  # Ground truth positives
-        if inside_bbox:
-            self.total_true_positives += 1  # True positive if max_position is inside the bbox
-        else:
-            self.total_false_positives += 1  # False positive if max_position is outside the bbox
+        # Combine both bounding boxes into a list for easier handling
+        bboxes = [largest_bbox, second_largest_bbox] if second_largest_bbox else [largest_bbox]
 
-        self.total_predicted_positives += 1  # Count this prediction for false alarm calculation
-
-        # Visualization code (unchanged)
+        # Visualization code (ensuring axes are always defined)
         fig, axes = plt.subplots(1, 3, figsize=(15, 5))
 
         axes[0].imshow(spectrum_np, cmap='viridis', aspect='auto')
@@ -133,11 +246,38 @@ class evaluator(Dataset):
         axes[2].imshow(pointcloud_gt_np, cmap='gray', aspect='auto')
         axes[2].set_title('Ground Truth Pointcloud')
 
-        # If a bounding box was found, draw it on the Ground Truth Pointcloud
-        if bbox:
-            r1, c1, r2, c2 = bbox[0].start, bbox[1].start, bbox[0].stop, bbox[1].stop
-            rect = patches.Rectangle((c1, r1), c2 - c1, r2 - r1, linewidth=2, edgecolor='red', facecolor='none')
-            axes[2].add_patch(rect)
+        # Draw bounding boxes for both the largest and second-largest closures
+        colors = ['red', 'blue']  # Different colors for the bounding boxes
+        for i, bbox in enumerate(bboxes):
+            if bbox:
+                r1, c1, r2, c2 = bbox[0].start, bbox[1].start, bbox[0].stop, bbox[1].stop
+                rect = patches.Rectangle((c1, r1), c2 - c1, r2 - r1, linewidth=2, edgecolor=colors[i], facecolor='none')
+                axes[2].add_patch(rect)
+
+        # Calculate detection and false alarm statistics
+        max_value = np.max(pointcloud_pred_np)
+        max_position = np.unravel_index(np.argmax(pointcloud_pred_np), pointcloud_pred_np.shape)
+
+        # Check if the max_position is inside either bounding box
+        inside_bbox = False
+        for bbox in bboxes:
+            if bbox:
+                r1, c1, r2, c2 = bbox[0].start, bbox[1].start, bbox[0].stop, bbox[1].stop
+                if (r1 <= max_position[0] < r2) and (c1 <= max_position[1] < c2):
+                    inside_bbox = True
+                    break
+
+        logger.info(f'Maximum value in prediction: {max_value} at position: {max_position}')
+        logger.info(f'Is the maximum value inside any bounding box? {"Yes" if inside_bbox else "No"}')
+
+        # Accumulate the statistics for the full dataset
+        self.total_gt_positives += np.sum(pointcloud_gt_np == 1)  # Ground truth positives
+        if inside_bbox:
+            self.total_true_positives += 1  # True positive if max_position is inside the bbox
+        else:
+            self.total_false_positives += 1  # False positive if max_position is outside the bbox
+
+        self.total_predicted_positives += 1  # Count this prediction for false alarm calculation
 
         # Draw the maximum value position
         axes[2].plot(max_position[1], max_position[0], 'bo', markersize=8, label='Max Value')
@@ -158,19 +298,21 @@ class evaluator(Dataset):
 
         return 0
 
+
     def extend_bbox_to_azimuth_intervals(self, bbox):
         # Original bounding box coordinates
         r1, c1, r2, c2 = bbox[0].start, bbox[1].start, bbox[0].stop, bbox[1].stop
 
         # The resolution for azimuth is 15 bins, so we extend the bounding box accordingly.
         # Extend r1 and r2 to the nearest multiple of 15.
-        r1_extended = max(0, r1 - (r1 % 15))
-        r2_extended = min(86, r2 + (15 - (r2 % 15)))  # Ensure r2 stays within bounds
+        r1_extended = max(0, r1 - (r1 % 10))
+        r2_extended = min(86, r2 + (10 - (r2 % 10)))  # Ensure r2 stays within bounds
 
         # Return the extended bounding box
         return (slice(r1_extended, r2_extended), slice(c1, c2))
+    # replace the function when evaluation the multi-target samples
 
-    def find_max_closure_bbox(self, matrix):
+    def find_two_largest_closures(self, matrix):
         # Label connected components of 1s
         labeled_array, num_features = label(matrix)
         
@@ -187,7 +329,33 @@ class evaluator(Dataset):
                     max_area = area
                     max_bbox = bbox
 
-        return max_bbox
+        return max_bbox, None
+
+    # def find_two_largest_closures(self, matrix):
+    #     # Label connected components of 1s
+    #     labeled_array, num_features = label(matrix)
+        
+    #     # Find bounding boxes of labeled components
+    #     bounding_boxes = find_objects(labeled_array)
+        
+    #     # Determine the two largest connected components based on area
+    #     areas = []
+    #     for bbox in bounding_boxes:
+    #         if bbox is not None:
+    #             area = (bbox[0].stop - bbox[0].start) * (bbox[1].stop - bbox[1].start)
+    #             areas.append((area, bbox))
+
+    #     # Sort the areas in descending order and pick the two largest
+    #     areas.sort(reverse=True, key=lambda x: x[0])
+    #     if len(areas) >= 2:
+    #         largest_bbox = areas[0][1]
+    #         second_largest_bbox = areas[1][1]
+    #         return largest_bbox, second_largest_bbox
+    #     elif len(areas) == 1:
+    #         return areas[0][1], None
+    #     else:
+    #         return None, None
+
 
     def get_final_metrics(self):
         # Calculate detection rate and false alarm rate after processing the full dataset

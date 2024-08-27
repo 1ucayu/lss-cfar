@@ -315,8 +315,6 @@ def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
-
-
 if __name__ == "__main__":
     num_layers = 4  # Example number of layers
     # d: hidden states, H; order: state space order, N; channels: M
