@@ -35,7 +35,7 @@ python train_model.py \
   --dt_min 1e-3 \
   --dt_max 8e-5 \
   --channels 1 \
-  --dropout 0.1 \
+  --dropout 0.0 \
   --learning_rate 1e-2 \
   --batch_size 4 \
   --num_workers 4 \
