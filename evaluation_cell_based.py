@@ -62,21 +62,11 @@ class Evaluator(Dataset):
         self.model = model.eval()
 
         # Initialize evaluation metrics
-        self.total_true_positives = 0
-        self.total_false_positives = 0
-        self.total_gt_positives = 0
-        self.total_predicted_positives = 0
+        self.total_detection_cells = 0
+        self.total_falsealarm_cells = 0
 
-        self.total_detected_rate = 0
-
-        self.total_non_env_samples = 0
-        self.successful_detections = 0
-        self.failed_detections = 0
-        self.total_env_samples = 0
-        self.false_alarms = 0
-
-        self.num_non_env_samples = 0
-        self.num_env_samples = 0
+        self.total_true_cells = 0
+        self.total_false_cells = 0
 
     def __len__(self):
         logger.info(f'Dataset Loaded, Size: {len(self.data_list)}')
@@ -118,33 +108,68 @@ class Evaluator(Dataset):
         spectrum_np = spectrum.view(87, 128).numpy()
 
         # Finding the two largest closures (bounding boxes) in the ground truth
-        bboxes = self.find_two_largest_closure_bboxes(pointcloud_gt_np, h_expand=15)
+        bboxes = self.find_two_largest_closure_bboxes(pointcloud_gt_np, h_expand=8)
         pointcloud_pred_np_mask = np.where(pointcloud_pred_np > 0, 1, 0)
         non_zero_positions = np.argwhere(pointcloud_pred_np_mask == 1)
 
-        total_non_zero = non_zero_positions.shape[0]
-        inside_bbox_count = 0
+        # Initialize variables for detection and false alarm rate calculation
+        detected_cells = 0
+        true_cells = 0
+        falsealarm_cells = 0
+        false_cells = 87 * 128  # Full figure size
 
+        # Calculate the detection rate and false alarm rate
         for bbox in bboxes:
             if bbox:
                 r1, c1, r2, c2 = bbox[0].start, bbox[1].start, bbox[0].stop, bbox[1].stop
-                for pos in non_zero_positions:
-                    if r1 <= pos[0] <= r2 and c1 <= pos[1] <= c2:
-                        inside_bbox_count += 1
 
-        # Determine if the sample is an environment sample or not
-        is_env_sample = 'env' in data_path
-        if is_env_sample:
-            self.num_env_samples += 1
-            self.total_env_samples += total_non_zero
-            if total_non_zero > 0:
-                self.false_alarms += inside_bbox_count
-        else:
-            self.num_non_env_samples += 1
-            self.total_non_env_samples += total_non_zero
-            if inside_bbox_count > 0:
-                self.total_detected_rate += inside_bbox_count / total_non_zero
-                self.successful_detections += inside_bbox_count
+                # Ensure r2 and c2 are within bounds
+                r2 = min(r2, 86)  # r2 must be less than 87
+                c2 = min(c2, 127)  # c2 must be less than 128
+
+                bbox_height = r2 - r1
+                bbox_width = c2 - c1
+
+                # Add bounding box area (including boundaries) to true cells
+                bbox_area = (bbox_height + 1) * (bbox_width + 1)
+                true_cells += bbox_area
+                false_cells -= bbox_area  # Remove the bounding box area from false cells
+
+                # Check each row within the bounding box, if any point in the bbox
+                # the entire bbox area is considered detected
+                
+
+                for row in range(r1, r2 + 1):
+                    row_points = pointcloud_pred_np_mask[row, c1:c2 + 1]
+                    if np.any(row_points > 0):
+                        detected_cells += bbox_area
+                        break
+                #         detected_cells += bbox_width + 1  # Add the entire row width of the bounding box to detected cells
+
+        # Calculate false alarm cells
+        outside_bbox_mask = np.ones_like(pointcloud_pred_np_mask)
+        for bbox in bboxes:
+            if bbox:
+                r1, c1, r2, c2 = bbox[0].start, bbox[1].start, bbox[0].stop, bbox[1].stop
+
+                # Ensure r2 and c2 are within bounds
+                r2 = min(r2, 86)  # r2 must be less than 87
+                c2 = min(c2, 127)  # c2 must be less than 128
+
+                outside_bbox_mask[r1:r2 + 1, c1:c2 + 1] = 0  # Mask out bounding box areas
+
+        falsealarm_cells = np.sum(pointcloud_pred_np_mask * outside_bbox_mask)
+
+        # Update metrics
+        self.total_detection_cells += detected_cells
+        self.total_falsealarm_cells += falsealarm_cells
+        self.total_true_cells += true_cells
+        self.total_false_cells += false_cells
+
+        logger.debug(f"Detected Cells: {self.total_detection_cells}")
+        logger.debug(f"True Cells: {self.total_true_cells}")
+        logger.debug(f"False Alarm Cells: {self.total_falsealarm_cells}")
+        logger.debug(f"False Cells: {self.total_false_cells}")
 
         # Visualization code
         fig, axes = plt.subplots(1, 3, figsize=(15, 5))
@@ -163,6 +188,11 @@ class Evaluator(Dataset):
         for i, bbox in enumerate(bboxes):
             if bbox:
                 r1, c1, r2, c2 = bbox[0].start, bbox[1].start, bbox[0].stop, bbox[1].stop
+
+                # Ensure r2 and c2 are within bounds
+                r2 = min(r2, 86)  # r2 must be less than 87
+                c2 = min(c2, 127)  # c2 must be less than 128
+
                 rect = patches.Rectangle((c1, r1), c2 - c1, r2 - r1, linewidth=2, edgecolor=colors[i], facecolor='none')
                 axes[2].add_patch(rect)
 
@@ -186,9 +216,10 @@ class Evaluator(Dataset):
 
         return 0
 
-    def find_two_largest_closure_bboxes(self, matrix, h_expand=15):
+    def find_two_largest_closure_bboxes(self, matrix, h_expand=0):
         labeled_array, num_features = label(matrix)
         bounding_boxes = find_objects(labeled_array)
+        # bounding_boxes are sorted by size in descending order.
         bounding_boxes = sorted(bounding_boxes, key=lambda bbox: (bbox[0].stop - bbox[0].start) * (bbox[1].stop - bbox[1].start), reverse=True)
 
         expanded_bboxes = []
@@ -196,54 +227,34 @@ class Evaluator(Dataset):
             r1, c1 = bbox[0].start, bbox[1].start
             r2, c2 = bbox[0].stop, bbox[1].stop 
             r1 = max(r1 - h_expand, 0)
-            r2 = min(r2 + h_expand, matrix.shape[1])
+            r2 = min(r2 + h_expand, matrix.shape[0] - 1)
             expanded_bboxes.append((slice(r1, r2), slice(c1, c2)))
 
         return expanded_bboxes
 
-    def get_final_metrics(self):
-        # Calculate detection rate and false alarm rate after processing the full dataset
-        detection_rate = self.total_true_positives / self.__len__()
-        false_alarm_rate = self.total_false_positives / self.__len__()
-
-        logger.info(f"Final Detection Rate: {detection_rate:.4f}")
-        logger.info(f"Final False Alarm Rate: {false_alarm_rate:.4f}")
-
-        logger.info(f"Total Non-Env Samples: {self.total_non_env_samples}")
-        logger.info(f"Successful Detections: {self.successful_detections}")
-        logger.info(f"Failed Detections: {self.failed_detections}")
-        logger.info(f"Total Env Samples: {self.total_env_samples}")
-        logger.info(f"False Alarms: {self.false_alarms}")
-        logger.info(f"Total Detected Rate: {self.total_detected_rate / self.num_non_env_samples:.4f}")
-        logger.info(f"Total False Alarm Rate: {self.false_alarms / self.num_env_samples:.4f}")
-        logger.info(f"Total Non-Env Samples: {self.num_non_env_samples}")
-        logger.info(f"Total Env Samples: {self.num_env_samples}")
-
-        return detection_rate, false_alarm_rate, self.total_non_env_samples, self.successful_detections, self.failed_detections, self.total_env_samples, self.false_alarms
-
 if __name__ == '__main__':
     dataset_paths = [
         "/data/lucayu/lss-cfar/dataset/cx_corridor_2024-08-27",
-        # "/data/lucayu/lss-cfar/dataset/cx_env_corridor_2024-08-27",
-        # "/data/lucayu/lss-cfar/dataset/luca_env_hw_101_2024-08-23",
+        "/data/lucayu/lss-cfar/dataset/cx_env_corridor_2024-08-27",
+        "/data/lucayu/lss-cfar/dataset/luca_env_hw_101_2024-08-23",
         "/data/lucayu/lss-cfar/dataset/luca_hw_101_2024-08-23",
         "/data/lucayu/lss-cfar/dataset/lucacx_corridor_2024-08-27",
-        # "/data/lucayu/lss-cfar/dataset/lucacx_env_corridor_2024-08-27",
-        # "/data/lucayu/lss-cfar/dataset/wayne_env_office_2024-08-27",
+        "/data/lucayu/lss-cfar/dataset/lucacx_env_corridor_2024-08-27",
+        "/data/lucayu/lss-cfar/dataset/wayne_env_office_2024-08-27",
         "/data/lucayu/lss-cfar/dataset/wayne_office_2024-08-27"
     ]
     calibration_paths = [
         "/data/lucayu/lss-cfar/raw_dataset/cx_env_corridor_2024-08-27",
-        # "/data/lucayu/lss-cfar/raw_dataset/cx_env_corridor_2024-08-27",
-        # "/data/lucayu/lss-cfar/raw_dataset/luca_env_hw_101_2024-08-23",
+        "/data/lucayu/lss-cfar/raw_dataset/cx_env_corridor_2024-08-27",
+        "/data/lucayu/lss-cfar/raw_dataset/luca_env_hw_101_2024-08-23",
         "/data/lucayu/lss-cfar/raw_dataset/luca_env_hw_101_2024-08-23",
         "/data/lucayu/lss-cfar/raw_dataset/lucacx_env_corridor_2024-08-27",
-        # "/data/lucayu/lss-cfar/raw_dataset/lucacx_env_corridor_2024-08-27",
-        # "/data/lucayu/lss-cfar/raw_dataset/wayne_env_office_2024-08-27",
+        "/data/lucayu/lss-cfar/raw_dataset/lucacx_env_corridor_2024-08-27",
+        "/data/lucayu/lss-cfar/raw_dataset/wayne_env_office_2024-08-27",
         "/data/lucayu/lss-cfar/raw_dataset/wayne_env_office_2024-08-27"
     ]
     
-    checkpoint_path = '/home/lucayu/lss-cfar/checkpoints/20240828-180832_model_layers_4_hidden_256_order_256_dtmin_0.001_dtmax_8e-05_channels_1_dropout_0.0_lr_0.01_batch_4_steps_10000_optimizer_AdamW_decay_0.1_step_1000_gamma_0.5_losstype_l1/20240828-180832_model_layers_4_hidden_256_order_256_dtmin_0.001_dtmax_8e-05_channels_1_dropout_0.0_lr_0.01_batch_4_steps_10000_optimizer_AdamW_decay_0.1_step_1000_gamma_0.5_losstype_l1.pt'
+    checkpoint_path = '/home/lucayu/lss-cfar/checkpoints/20240828-200315_model_layers_4_hidden_256_order_256_dtmin_0.001_dtmax_8e-05_channels_1_dropout_0.0_lr_0.01_batch_4_steps_10000_optimizer_AdamW_decay_0.1_step_300_gamma_0.5_losstype_l1/20240828-200315_model_layers_4_hidden_256_order_256_dtmin_0.001_dtmax_8e-05_channels_1_dropout_0.0_lr_0.01_batch_4_steps_10000_optimizer_AdamW_decay_0.1_step_300_gamma_0.5_losstype_l1.pt'
     eval_dataset = Evaluator(phase='test', dataset_paths=dataset_paths, calibration_paths=calibration_paths, checkpoint_path=checkpoint_path)
 
     eval_loader = DataLoader(eval_dataset, batch_size=1, shuffle=False)
@@ -251,10 +262,3 @@ if __name__ == '__main__':
     for data in tqdm(eval_loader):
         pass  # The __getitem__ method handles processing and accumulation
 
-    detection_rate, false_alarm_rate, total_non_env_samples, successful_detections, failed_detections, total_env_samples, false_alarms = eval_dataset.get_final_metrics()
-
-    print(f"Total Non-Env Samples: {total_non_env_samples}")
-    print(f"Successful Detections: {successful_detections}")
-    print(f"Failed Detections: {failed_detections}")
-    print(f"Total Env Samples: {total_env_samples}")
-    print(f"False Alarms: {false_alarms}")

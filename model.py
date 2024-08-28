@@ -276,7 +276,7 @@ class LSSLModel(nn.Module):
         self.norms = nn.ModuleList([nn.LayerNorm(d) for _ in range(num_layers)])
         self.output_norms = nn.LayerNorm(d)
         self.fc = nn.Linear(d, 1)
-        self.threshold = nn.Parameter(torch.tensor(0.8))
+        self.threshold = nn.Parameter(torch.tensor(0.65))
 
     def forward(self, x):
         # clone the input tensor without expanding

@@ -251,7 +251,7 @@ class evaluator(Dataset):
     
 if __name__ == '__main__':
     dataset_path = '/data/lucayu/lss-cfar/dataset/lucacx_corridor_2024-08-27'
-    checkpoint_path = '/home/lucayu/lss-cfar/checkpoints/20240828-010835_model_layers_4_hidden_256_order_256_dtmin_0.001_dtmax_8e-05_channels_1_dropout_0.1_lr_0.01_batch_4_steps_10000_optimizer_AdamW_decay_0.1_step_300_gamma_0.5_losstype_bce/20240828-010835_model_layers_4_hidden_256_order_256_dtmin_0.001_dtmax_8e-05_channels_1_dropout_0.1_lr_0.01_batch_4_steps_10000_optimizer_AdamW_decay_0.1_step_300_gamma_0.5_losstype_bce.pt'
+    checkpoint_path = '/home/lucayu/lss-cfar/checkpoints/20240828-200315_model_layers_4_hidden_256_order_256_dtmin_0.001_dtmax_8e-05_channels_1_dropout_0.0_lr_0.01_batch_4_steps_10000_optimizer_AdamW_decay_0.1_step_300_gamma_0.5_losstype_l1/20240828-200315_model_layers_4_hidden_256_order_256_dtmin_0.001_dtmax_8e-05_channels_1_dropout_0.0_lr_0.01_batch_4_steps_10000_optimizer_AdamW_decay_0.1_step_300_gamma_0.5_losstype_l1.pt'
     eval_dataset = evaluator(phase='test', dataset_path=dataset_path, checkpoint_path=checkpoint_path)
 
     # Create a DataLoader to handle batches (you can adjust batch_size)
