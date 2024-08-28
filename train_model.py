@@ -78,8 +78,8 @@ def train():
     ).to(device)
     
     # Load dataset
-    train_dataset = lsscfarDataset(phase='train', dataset_path=args.dataset_path)
-    val_dataset = lsscfarDataset(phase='test', dataset_path=args.dataset_path)
+    train_dataset = lsscfarDataset(phase='train', dataset_paths=args.dataset_paths, calibration_paths=args.calibration_paths)
+    val_dataset = lsscfarDataset(phase='test', dataset_paths=args.dataset_paths, calibration_paths=args.calibration_paths)
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, collate_fn=train_dataset._collate_fn)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers, collate_fn=val_dataset._collate_fn)

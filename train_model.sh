@@ -2,49 +2,50 @@
 
 # Training script for the LSSL model
 
-# Set default values for hyperparameters (you can change these if needed)
-DATASET_PATH="/data/lucayu/lss-cfar/dataset/lucacx_corridor_2024-08-27"
-NUM_LAYERS=4
-HIDDEN_DIM=256 #142
-ORDER=256
-DT_MIN=1e-3
-DT_MAX=8e-5
-CHANNELS=1
-DROPOUT=0.1
-LEARNING_RATE=1e-2
-BATCH_SIZE=4
-NUM_WORKERS=4
-TOTAL_STEPS=10000
-WEIGHT_DECAY=1e-1
-OPTIMIZER="AdamW"
-STEP_SIZE=300
-GAMMA=0.5
-SAVE_DIR="./checkpoints"
-VISUALIZATION_STRIDE=100
-GPUS="0"
-LOG_DIR="./logs"
-LOSS_TYPE="bce"
+# Define dataset paths and calibration paths as arrays
+DATASET_PATHS=(
+    "/data/lucayu/lss-cfar/dataset/cx_corridor_2024-08-27"
+    "/data/lucayu/lss-cfar/dataset/cx_env_corridor_2024-08-27"
+    "/data/lucayu/lss-cfar/dataset/luca_env_hw_101_2024-08-23"
+    "/data/lucayu/lss-cfar/dataset/luca_hw_101_2024-08-23"
+    "/data/lucayu/lss-cfar/dataset/lucacx_corridor_2024-08-27"
+    "/data/lucayu/lss-cfar/dataset/lucacx_env_corridor_2024-08-27"
+    "/data/lucayu/lss-cfar/dataset/wayne_env_office_2024-08-27"
+    "/data/lucayu/lss-cfar/dataset/wayne_office_2024-08-27"
+)
 
-# Run the training script
+CALIBRATION_PATHS=(
+    "/data/lucayu/lss-cfar/raw_dataset/cx_env_corridor_2024-08-27"
+    "/data/lucayu/lss-cfar/raw_dataset/cx_env_corridor_2024-08-27"
+    "/data/lucayu/lss-cfar/raw_dataset/luca_env_hw_101_2024-08-23"
+    "/data/lucayu/lss-cfar/raw_dataset/luca_env_hw_101_2024-08-23"
+    "/data/lucayu/lss-cfar/raw_dataset/lucacx_env_corridor_2024-08-27"
+    "/data/lucayu/lss-cfar/raw_dataset/lucacx_env_corridor_2024-08-27"
+    "/data/lucayu/lss-cfar/raw_dataset/wayne_env_office_2024-08-27"
+    "/data/lucayu/lss-cfar/raw_dataset/wayne_env_office_2024-08-27"
+)
+
+# Run the training script and pass arrays as arguments
 python train_model.py \
-  --dataset_path $DATASET_PATH \
-  --num_layers $NUM_LAYERS \
-  --hidden_dim $HIDDEN_DIM \
-  --order $ORDER \
-  --dt_min $DT_MIN \
-  --dt_max $DT_MAX \
-  --channels $CHANNELS \
-  --dropout $DROPOUT \
-  --learning_rate $LEARNING_RATE \
-  --batch_size $BATCH_SIZE \
-  --num_workers $NUM_WORKERS \
-  --total_steps $TOTAL_STEPS \
-  --weight_decay $WEIGHT_DECAY \
-  --optimizer $OPTIMIZER \
-  --step_size $STEP_SIZE \
-  --gamma $GAMMA \
-  --save_dir $SAVE_DIR \
-  --visualization_stride $VISUALIZATION_STRIDE \
-  --gpus $GPUS \
-  --log_dir $LOG_DIR \
-  --loss_type $LOSS_TYPE
+  --dataset_paths "${DATASET_PATHS[@]}" \
+  --calibration_paths "${CALIBRATION_PATHS[@]}" \
+  --num_layers 4 \
+  --hidden_dim 256 \
+  --order 256 \
+  --dt_min 1e-3 \
+  --dt_max 8e-5 \
+  --channels 1 \
+  --dropout 0.1 \
+  --learning_rate 1e-2 \
+  --batch_size 4 \
+  --num_workers 4 \
+  --total_steps 10000 \
+  --weight_decay 1e-1 \
+  --optimizer AdamW \
+  --step_size 300 \
+  --gamma 0.5 \
+  --save_dir "./checkpoints" \
+  --visualization_stride 100 \
+  --gpus 0 \
+  --log_dir "./logs" \
+  --loss_type "l1"

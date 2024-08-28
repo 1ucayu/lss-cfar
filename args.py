@@ -3,8 +3,9 @@ import argparse
 def get_args():
     parser = argparse.ArgumentParser(description='LSSL Model Training')
     # Dataset hyperparameters
-    parser.add_argument('--dataset_path', type=str, default='/data/lucayu/lss-cfar/dataset', help='Path to the dataset')
-
+    parser.add_argument('--dataset_paths', type=str, nargs='+', help='List of dataset paths')
+    parser.add_argument('--calibration_paths', type=str, nargs='+', help='List of calibration paths')
+    
     # Model hyperparameters
     parser.add_argument('--num_layers', type=int, default=4, help='Number of layers in the model')
     parser.add_argument('--hidden_dim', type=int, default=142, help='Hidden dimension (d)')

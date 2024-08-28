@@ -7,29 +7,36 @@ import pickle
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 
-
 class lsscfarDataset(Dataset):
-    def __init__(self, phase, dataset_path):
-        self.phases = phase
+    def __init__(self, phase, dataset_paths, calibration_paths):
+        assert len(dataset_paths) == len(calibration_paths), "Each dataset path must have a corresponding calibration path"
+        
+        self.phase = phase
         self.data_list = []
-        self.dataset_path = dataset_path
-        data_path = f'{dataset_path}/{phase}'
-        self.data_list += [f'{dataset_path}/{phase}/{data}' for data in os.listdir(data_path)]
+        self.dataset_paths = dataset_paths
+        self.calibration_paths = calibration_paths
+        self.calibration_spectrums = []
+
+        # Load data paths
+        for dataset_path in self.dataset_paths:
+            data_path = os.path.join(dataset_path, phase)
+            self.data_list += [os.path.join(data_path, data) for data in os.listdir(data_path)]
+
         self.calibration = True
         if self.calibration:
             logger.info('Calibration mode enabled')
-            calibration_path = '/data/lucayu/lss-cfar/raw_dataset/lucacx_env_corridor_2024-08-27'
-            calibration_files = os.listdir(calibration_path)
-            calibration_spectrum = torch.zeros(87, 128)
-            for calibration_file in calibration_files:
-                with open(f'{calibration_path}/{calibration_file}', 'rb') as f:
-                    calibration_data = pickle.load(f)
-                calibration_data = calibration_data['spectrum']
-                calibration_data = torch.tensor(calibration_data, dtype=torch.float32).flip(0)
-                calibration_data = calibration_data[:,14:]
-                calibration_spectrum += torch.tensor(calibration_data, dtype=torch.float32)
-            calibration_spectrum = calibration_spectrum / len(calibration_files)
-            self.calibration_spectrum = calibration_spectrum
+            for calibration_path in self.calibration_paths:
+                calibration_files = os.listdir(calibration_path)
+                calibration_spectrum = torch.zeros(87, 128)
+                for calibration_file in calibration_files:
+                    with open(os.path.join(calibration_path, calibration_file), 'rb') as f:
+                        calibration_data = pickle.load(f)
+                    calibration_data = calibration_data['spectrum']
+                    calibration_data = torch.tensor(calibration_data, dtype=torch.float32).flip(0)
+                    calibration_data = calibration_data[:, 14:]
+                    calibration_spectrum += torch.tensor(calibration_data, dtype=torch.float32)
+                calibration_spectrum = calibration_spectrum / len(calibration_files)
+                self.calibration_spectrums.append(calibration_spectrum)  # Correctly place this line inside the loop
 
     def __len__(self):
         logger.info(f'Dataset Loaded, Size: {len(self.data_list)}')
@@ -37,63 +44,42 @@ class lsscfarDataset(Dataset):
     
     def __getitem__(self, idx):
         data_path = self.data_list[idx]
+
+        # Determine which dataset and corresponding calibration spectrum to use
+        for i, dataset_path in enumerate(self.dataset_paths):
+            if data_path.startswith(dataset_path):
+                calibration_spectrum = self.calibration_spectrums[i]
+                break
+        
         with open(data_path, 'rb') as f:
             data = pickle.load(f)
-        # raw_pointcloud = data['pointcloud']
+        
         spectrum = torch.tensor(data['spectrum'], dtype=torch.float32)
         pointcloud = torch.tensor(data['pointcloud'], dtype=torch.float32)
         spectrum = spectrum[:, 14:]
         pointcloud = pointcloud[:, 14:]
-        # normalize the spectrum
+
         if self.calibration:
-            # spectrum = spectrum / calibration_spectrum    # do not use divison calibration
-            spectrum = spectrum - self.calibration_spectrum
+            spectrum = spectrum - calibration_spectrum
 
             # for pointcloud, if calibration, set the 1 value to 0 then set 2 value to 1
             pointcloud = torch.where(pointcloud == 1, torch.tensor(0), pointcloud)
-            # pointcloud = torch.where(pointcloud == 0, torch.tensor(-1), pointcloud)
             pointcloud = torch.where(pointcloud == 2, torch.tensor(1), pointcloud)
-        
-        # normalize the spectrum
-        ############## do not normalize the spectrum
-        # spectrum = spectrum / spectrum.max()
-        # z-score normalization
-        # spectrum = (spectrum - spectrum.mean()) / spectrum.std()
-        # min-max normalization
-        # spectrum = (spectrum - spectrum.min()) / (spectrum.max() - spectrum.min())
 
-        # pointcloud = self._pointcloud_process(raw_pointcloud, spectrum)
-        # logger.info(f'Pointcloud shape: {pointcloud.shape}')
-        
-        ############## reverse the spectrum to test
-        # spectrum = spectrum.transpose(0, -1)
-        # pointcloud = pointcloud.transpose(0, -1)
-
-        ############## remove the first 14 bins in the second dimension
-        ############## because the min depth of the pointcloud is 0.6m
-        
-        
-        # flatten the spectrum and pointcloud
+        # Flatten the spectrum and pointcloud
         spectrum = spectrum.flatten()
         pointcloud = pointcloud.flatten()
-        # logger.info(f'Pointcloud shape: {pointcloud.shape}')
+
         result = {
-            'pointcloud': pointcloud,    #.transpose(0, -1),
-            'spectrum': spectrum    #.transpose(0, -1)
+            'pointcloud': pointcloud,
+            'spectrum': spectrum
         }
         return result
     
-    # def _pointcloud_process(self, pointcloud, spectrum):
-    #     pointcloud = Image.open(io.BytesIO(pointcloud))
-    #     pointcloud = pointcloud.resize((spectrum.shape[1], spectrum.shape[0]))
-    #     pointcloud = torch.from_numpy(np.array(pointcloud)).float()
-    #     pointcloud = (pointcloud[:, :, 3] > 0).float()  # > / == debug here
-    #     return pointcloud
-
     def _collate_fn(self, batch):
         # Stack pointclouds along the batch dimension (second dimension)
-        pointclouds = torch.stack([item['pointcloud'] for item in batch], dim=1)  # Batch dimension is 1
-        spectrums = torch.stack([item['spectrum'] for item in batch], dim=1)  # Batch dimension is 1
+        pointclouds = torch.stack([item['pointcloud'] for item in batch], dim=1)
+        spectrums = torch.stack([item['spectrum'] for item in batch], dim=1)
         return {'pointcloud': pointclouds, 'spectrum': spectrums}
 
 

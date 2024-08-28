@@ -276,6 +276,7 @@ class LSSLModel(nn.Module):
         self.norms = nn.ModuleList([nn.LayerNorm(d) for _ in range(num_layers)])
         self.output_norms = nn.LayerNorm(d)
         self.fc = nn.Linear(d, 1)
+        self.threshold = nn.Parameter(torch.tensor(0.6))
 
     def forward(self, x):
         # clone the input tensor without expanding
@@ -298,9 +299,9 @@ class LSSLModel(nn.Module):
 
         x = x * x_init
 
-        # max_val = x.max(dim=-1, keepdim=True)[0]
-        # threshold = 0.6 * max_val
-        # x = torch.where(x >= threshold, x, torch.zeros_like(x))
+        max_val = x.max(dim=-1, keepdim=True)[0]
+        threshold = self.threshold * max_val
+        x = torch.where(x >= threshold, x, torch.zeros_like(x))
         # x = F.relu(x)
         # logger.debug(f"Output: {x}")
         # choose the max value in the last dimension
