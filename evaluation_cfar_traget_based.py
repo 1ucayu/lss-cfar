@@ -7,31 +7,39 @@ import matplotlib.patches as patches
 import numpy as np
 from scipy.ndimage import label, find_objects
 from torch.utils.data import DataLoader, Dataset
+from model import LSSLModel
+from args import get_args
 from tqdm import tqdm
+from datetime import datetime
 
-class evaluator(Dataset):
-
-    def __init__(self, phase, dataset_path):
-        self.phases = phase
+class Evaluator(Dataset):
+    def __init__(self, phase, dataset_paths, calibration_paths):
+        self.phase = phase
         self.data_list = []
-        self.dataset_path = dataset_path
-        data_path = f'{dataset_path}/{phase}'
-        self.data_list += [f'{dataset_path}/{phase}/{data}' for data in os.listdir(data_path)]
+        self.dataset_paths = dataset_paths
+        self.calibration_paths = calibration_paths
+        self.calibration_spectrums = []
+
+        # Load data paths
+        for dataset_path in self.dataset_paths:
+            data_path = os.path.join(dataset_path, phase)
+            self.data_list += [os.path.join(data_path, data) for data in os.listdir(data_path)]
+
         self.calibration = True
         if self.calibration:
             logger.info('Calibration mode enabled')
-            calibration_path = '/data/lucayu/lss-cfar/raw_dataset/env'
-            calibration_files = os.listdir(calibration_path)
-            calibration_spectrum = torch.zeros(87, 128)
-            for calibration_file in calibration_files:
-                with open(f'{calibration_path}/{calibration_file}', 'rb') as f:
-                    calibration_data = pickle.load(f)
-                calibration_data = calibration_data['spectrum']
-                calibration_data = torch.tensor(calibration_data, dtype=torch.float32).flip(0)
-                calibration_data = calibration_data[:, 14:]
-                calibration_spectrum += torch.tensor(calibration_data, dtype=torch.float32)
-            calibration_spectrum = calibration_spectrum / len(calibration_files)
-            self.calibration_spectrum = calibration_spectrum
+            for calibration_path in self.calibration_paths:
+                calibration_files = os.listdir(calibration_path)
+                calibration_spectrum = torch.zeros(87, 128)
+                for calibration_file in calibration_files:
+                    with open(os.path.join(calibration_path, calibration_file), 'rb') as f:
+                        calibration_data = pickle.load(f)
+                    calibration_data = calibration_data['spectrum']
+                    calibration_data = torch.tensor(calibration_data, dtype=torch.float32).flip(0)
+                    calibration_data = calibration_data[:, 14:]
+                    calibration_spectrum += torch.tensor(calibration_data, dtype=torch.float32)
+                calibration_spectrum = calibration_spectrum / len(calibration_files)
+                self.calibration_spectrums.append(calibration_spectrum)
 
         self.total_true_positives = 0
         self.total_false_positives = 0
@@ -43,8 +51,15 @@ class evaluator(Dataset):
         return len(self.data_list)
 
     def __getitem__(self, idx):
-        pickle_path = self.data_list[idx]
-        with open(pickle_path, 'rb') as f:
+        data_path = self.data_list[idx]
+
+        # Determine which dataset and corresponding calibration spectrum to use
+        for i, dataset_path in enumerate(self.dataset_paths):
+            if data_path.startswith(dataset_path):
+                calibration_spectrum = self.calibration_spectrums[i]
+                break
+
+        with open(data_path, 'rb') as f:
             data = pickle.load(f)
         
         spectrum = torch.tensor(data['spectrum'], dtype=torch.float32)
@@ -53,7 +68,7 @@ class evaluator(Dataset):
         pointcloud = pointcloud[:, 14:]
 
         if self.calibration:
-            spectrum = spectrum - self.calibration_spectrum
+            spectrum = spectrum - calibration_spectrum
             pointcloud = torch.where(pointcloud == 1, torch.tensor(0), pointcloud)
             pointcloud = torch.where(pointcloud == 2, torch.tensor(1), pointcloud)
 
@@ -66,7 +81,6 @@ class evaluator(Dataset):
 
         # Get the positions marked by CFAR
         detected_positions = np.argwhere(pointcloud_pred_np == 1)
-        # logger.info(f"Detected positions: {detected_positions}")
 
         # Calculate the centroid of the detected positions
         if detected_positions.size > 0:
@@ -127,7 +141,7 @@ class evaluator(Dataset):
         axes[2].legend()
 
         # Save the figure to the given folder path with an automatic name
-        save_folder = '/data/lucayu/lss-cfar/' + cfar_type + '_evaluation_visualization'
+        save_folder = os.path.join('/data/lucayu/lss-cfar/', cfar_type + '_evaluation_visualization')
         os.makedirs(save_folder, exist_ok=True)
         file_name = f'sample_{idx:04d}.png'
         save_path = os.path.join(save_folder, file_name)
@@ -138,7 +152,7 @@ class evaluator(Dataset):
         plt.close(fig)  # Close the figure to free memory
 
         return 0
-
+    
     def apply_cfar(self, spectrum, cfar_type='OS'):
         # CFAR Parameters
         guard_cells = 5
@@ -274,27 +288,75 @@ class evaluator(Dataset):
                     max_bbox = bbox
 
         return max_bbox
-
-    def get_final_metrics(self):
-        # Calculate detection rate and false alarm rate after processing the full dataset
-        detection_rate = self.total_true_positives / self.__len__()
-        false_alarm_rate = self.total_false_positives / self.__len__()
-
-        logger.info(f"Final Detection Rate: {detection_rate:.4f}")
-        logger.info(f"Final False Alarm Rate: {false_alarm_rate:.4f}")
-
-        return detection_rate, false_alarm_rate
     
-if __name__ == '__main__':
-    dataset_path = '/data/lucayu/lss-cfar/dataset'
-    eval_dataset = evaluator(phase='test', dataset_path=dataset_path)
+    def find_two_largest_closure_bboxes(self, matrix, h_expand=0):
+        labeled_array, num_features = label(matrix)
+        bounding_boxes = find_objects(labeled_array)
+        # bounding_boxes are sorted by size in descending order.
+        bounding_boxes = sorted(bounding_boxes, key=lambda bbox: (bbox[0].stop - bbox[0].start) * (bbox[1].stop - bbox[1].start), reverse=True)
 
-    # Create a DataLoader to handle batches (you can adjust batch_size)
+        expanded_bboxes = []
+        for bbox in bounding_boxes[:2]:
+            r1, c1 = bbox[0].start, bbox[1].start
+            r2, c2 = bbox[0].stop, bbox[1].stop 
+            r1 = max(r1 - h_expand, 0)
+            r2 = min(r2 + h_expand, matrix.shape[0] - 1)
+            expanded_bboxes.append((slice(r1, r2), slice(c1, c2)))
+
+        return expanded_bboxes
+
+    def find_max_closure_bbox(self, matrix, h_expand=0):
+        # Label connected components of 1s
+        labeled_array, num_features = label(matrix)
+        
+        # Find bounding boxes of labeled components
+        bounding_boxes = find_objects(labeled_array)
+        
+        # Determine the largest connected component based on area
+        max_area = 0
+        max_bbox = None
+        for bbox in bounding_boxes:
+            if bbox is not None:
+                area = (bbox[0].stop - bbox[0].start) * (bbox[1].stop - bbox[1].start)
+                if area > max_area:
+                    max_area = area
+                    max_bbox = bbox
+        expanded_bboxes = []
+        for bbox in bounding_boxes[:2]:
+            r1, c1 = bbox[0].start, bbox[1].start
+            r2, c2 = bbox[0].stop, bbox[1].stop 
+            r1 = max(r1 - h_expand, 0)
+            r2 = min(r2 + h_expand, matrix.shape[0] - 1)
+            expanded_bboxes.append((slice(r1, r2), slice(c1, c2)))
+
+        return max_bbox
+
+if __name__ == '__main__':
+    dataset_paths = [
+        "/data/lucayu/lss-cfar/dataset/cx_corridor_2024-08-27",
+        "/data/lucayu/lss-cfar/dataset/cx_env_corridor_2024-08-27",
+        "/data/lucayu/lss-cfar/dataset/luca_env_hw_101_2024-08-23",
+        "/data/lucayu/lss-cfar/dataset/luca_hw_101_2024-08-23",
+        "/data/lucayu/lss-cfar/dataset/lucacx_corridor_2024-08-27",
+        "/data/lucayu/lss-cfar/dataset/lucacx_env_corridor_2024-08-27",
+        "/data/lucayu/lss-cfar/dataset/wayne_env_office_2024-08-27",
+        "/data/lucayu/lss-cfar/dataset/wayne_office_2024-08-27"
+    ]
+    calibration_paths = [
+        "/data/lucayu/lss-cfar/raw_dataset/cx_env_corridor_2024-08-27",
+        "/data/lucayu/lss-cfar/raw_dataset/cx_env_corridor_2024-08-27",
+        "/data/lucayu/lss-cfar/raw_dataset/luca_env_hw_101_2024-08-23",
+        "/data/lucayu/lss-cfar/raw_dataset/luca_env_hw_101_2024-08-23",
+        "/data/lucayu/lss-cfar/raw_dataset/lucacx_env_corridor_2024-08-27",
+        "/data/lucayu/lss-cfar/raw_dataset/lucacx_env_corridor_2024-08-27",
+        "/data/lucayu/lss-cfar/raw_dataset/wayne_env_office_2024-08-27",
+        "/data/lucayu/lss-cfar/raw_dataset/wayne_env_office_2024-08-27"
+    ]
+    
+    eval_dataset = Evaluator(phase='test', dataset_paths=dataset_paths, calibration_paths=calibration_paths)
+
     eval_loader = DataLoader(eval_dataset, batch_size=1, shuffle=False)
 
-    # Process all samples
     for data in tqdm(eval_loader):
-        pass  # The __getitem__ method already handles the processing and accumulation
+        pass  # The __getitem__ method handles processing and accumulation
 
-    # After processing all batches, get the final metrics
-    detection_rate, false_alarm_rate = eval_dataset.get_final_metrics()

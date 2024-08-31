@@ -68,6 +68,11 @@ class AdaptiveTransition(nn.Module):
         A, B = hippo(N)
         A = torch.as_tensor(A, dtype=torch.float)
         B = torch.as_tensor(B, dtype=torch.float)[:, 0]
+
+        ######
+
+        # logger.info(f"A: {A.shape}, B: {B.shape}")
+
         self.register_buffer('A', A)
         self.register_buffer('B', B)
 
@@ -205,6 +210,7 @@ class StateSpace(nn.Module):
 
         self.C = nn.Parameter(torch.randn(self.H, self.M, self.N))
         self.D = nn.Parameter(torch.randn(self.H, self.M))
+        # logger.info(f"C: {self.C.shape}, D: {self.D.shape}")
 
         # Initialize timescales
         log_dt = torch.rand(self.H) * (math.log(dt_max)-math.log(dt_min)) + math.log(dt_min)
@@ -264,6 +270,7 @@ class StateSpace(nn.Module):
         y = y.transpose(0, -1) # (L, B, ..., M)
         y = y + u.unsqueeze(-1) * self.D.to(device=y.device) # (L, B, ..., M)
         # print(y.shape)
+        # logger.info(f"y: {y.shape}")
         return y
 
 class LSSLModel(nn.Module):
@@ -319,9 +326,9 @@ def count_parameters(model):
 if __name__ == "__main__":
     num_layers = 4  # Example number of layers
     # d: hidden states, H; order: state space order, N; channels: M
-    model = LSSLModel(num_layers, d=256, order=256, dt_min=1e-3, dt_max=1e-1, channels=1, dropout=0.1)
+    model = LSSLModel(num_layers, d=256, order=256, dt_min=8e-5, dt_max=1e-1, channels=1, dropout=0.1)
 
-    input_tensor = torch.randn(87*142, 4)  # (sequence_length, batch_size, hidden_dimension)
+    input_tensor = torch.randn(87, 4)  # (sequence_length, batch_size)
     output = model(input_tensor)
     logger.info(f"Output shape: {output.shape}")
     logger.info(f"Model info: {model}")
