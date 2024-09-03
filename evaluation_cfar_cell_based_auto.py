@@ -9,6 +9,7 @@ from scipy.ndimage import label, find_objects
 from scipy.ndimage import convolve
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
+import csv
 
 class Evaluator(Dataset):
     def __init__(self, phase, dataset_paths, calibration_paths):
@@ -79,8 +80,7 @@ class Evaluator(Dataset):
         pointcloud_gt_np = pointcloud.numpy()
 
         # Perform CFAR detection
-        cfar_type = 'SO'  # Change this to 'OS', 'GO', or 'SO' to test different CFAR methods
-        pointcloud_pred_np = self.apply_cfar(spectrum_np, cfar_type)
+        pointcloud_pred_np = self.apply_cfar(spectrum_np, self.current_cfar_type, self.current_threshold_factor)
 
         pointcloud_pred_np_mask = np.where(pointcloud_pred_np > 0, 1, 0)
 
@@ -141,13 +141,13 @@ class Evaluator(Dataset):
         self.total_true_cells += true_cells
         self.total_false_cells += false_cells
 
-        logger.debug(f"Detected Cells: {self.total_detection_cells}")
-        logger.debug(f"True Cells: {self.total_true_cells}")
-        logger.debug(f"False Alarm Cells: {self.total_falsealarm_cells}")
-        logger.debug(f"False Cells: {self.total_false_cells}")
+        # logger.debug(f"Detected Cells: {self.total_detection_cells}")
+        # logger.debug(f"True Cells: {self.total_true_cells}")
+        # logger.debug(f"False Alarm Cells: {self.total_falsealarm_cells}")
+        # logger.debug(f"False Cells: {self.total_false_cells}")
 
-        logger.debug(f"Detection Rate: {self.total_detection_cells / self.total_true_cells}")
-        logger.debug(f"False Alarm Rate: {self.total_falsealarm_cells / self.total_false_cells}")
+        # logger.debug(f"Detection Rate: {self.total_detection_cells / self.total_true_cells}")
+        # logger.debug(f"False Alarm Rate: {self.total_falsealarm_cells / self.total_false_cells}")
 
         isVisualizations = False  # Set to True to enable visualizations
         # Visualization code
@@ -180,7 +180,7 @@ class Evaluator(Dataset):
             plt.show()
 
             # Save the figure in the corresponding path under /evaluation_visualization/
-            save_path = data_path.replace('/dataset/', '/cfar_evaluation_visualization/'+cfar_type+'/').replace('.pickle', '.png')
+            save_path = data_path.replace('/dataset/', '/cfar_evaluation_visualization/'+self.current_cfar_type+'/').replace('.pickle', '.png')
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
             fig.savefig(save_path)
 
@@ -190,11 +190,10 @@ class Evaluator(Dataset):
 
         return 0
     
-    def apply_cfar(self, spectrum, cfar_type='CA'):
+    def apply_cfar(self, spectrum, cfar_type='CA', threshold_factor=5.8):
         # CFAR Parameters
         guard_len = 3
         noise_len = 10
-        threshold_factor = 5.7
 
         if cfar_type == 'CA':
             return self.ca_cfar_2d(spectrum, guard_len=guard_len, noise_len=noise_len, threshold_factor=threshold_factor)
@@ -210,7 +209,7 @@ class Evaluator(Dataset):
     def ca_cfar_2d(self, x, guard_len=4, noise_len=8, threshold_factor=4, mode='reflect'):
         # Create a 2D kernel
         kernel_size = 1 + (2 * guard_len) + (2 * noise_len)
-        kernel = np.ones((kernel_size, kernel_size), dtype=x.dtype) / (2 * noise_len)**2
+        kernel = np.ones((kernel_size, kernel_size), dtype=np.float32) / (2 * noise_len)**2
         kernel[noise_len:noise_len + (2 * guard_len) + 1, noise_len:noise_len + (2 * guard_len) + 1] = 0
         
         # Compute noise floor using 2D convolution
@@ -226,7 +225,7 @@ class Evaluator(Dataset):
 
     def os_cfar_2d(self, x, guard_len=4, noise_len=8, threshold_factor=4, mode='reflect'):
         kernel_size = 1 + (2 * guard_len) + (2 * noise_len)
-        kernel = np.ones((kernel_size, kernel_size), dtype=x.dtype)
+        kernel = np.ones((kernel_size, kernel_size), dtype=np.float32)
         kernel[noise_len:noise_len + (2 * guard_len) + 1, noise_len:noise_len + (2 * guard_len) + 1] = 0
         
         # Pad the input for boundary conditions
@@ -248,7 +247,7 @@ class Evaluator(Dataset):
 
     def go_cfar_2d(self, x, guard_len=4, noise_len=8, threshold_factor=4, mode='reflect'):
         kernel_size = 1 + (2 * guard_len) + (2 * noise_len)
-        kernel = np.ones((kernel_size, kernel_size), dtype=x.dtype)
+        kernel = np.ones((kernel_size, kernel_size), dtype=np.float32)
         kernel[noise_len:noise_len + (2 * guard_len) + 1, noise_len:noise_len + (2 * guard_len) + 1] = 0
         
         # Pad the input for boundary conditions
@@ -271,7 +270,7 @@ class Evaluator(Dataset):
 
     def so_cfar_2d(self, x, guard_len=4, noise_len=8, threshold_factor=4, mode='reflect'):
         kernel_size = 1 + (2 * guard_len) + (2 * noise_len)
-        kernel = np.ones((kernel_size, kernel_size), dtype=x.dtype)
+        kernel = np.ones((kernel_size, kernel_size), dtype=np.float32)
         kernel[noise_len:noise_len + (2 * guard_len) + 1, noise_len:noise_len + (2 * guard_len) + 1] = 0
         
         # Pad the input for boundary conditions
@@ -325,7 +324,7 @@ class Evaluator(Dataset):
             if bbox is not None:
                 area = (bbox[0].stop - bbox[0].start) * (bbox[1].stop - bbox[1].start)
                 if area > max_area:
-                    max_area = area
+                    # max_bbox = bbox
                     max_bbox = bbox
 
         if max_bbox is None:
@@ -362,9 +361,53 @@ if __name__ == '__main__':
         "/data/lucayu/lss-cfar/raw_dataset/wayne_env_office_2024-08-27"
     ]
     
+    # Initialize dataset and dataloader
     eval_dataset = Evaluator(phase='test', dataset_paths=dataset_paths, calibration_paths=calibration_paths)
-
     eval_loader = DataLoader(eval_dataset, batch_size=1, shuffle=False)
 
-    for data in tqdm(eval_loader):
-        pass  # The __getitem__ method handles processing and accumulation
+    # CSV file to save results
+    results_file = 'cfar_evaluation_results.csv'
+    
+    with open(results_file, 'w', newline='') as csvfile:
+        fieldnames = ['CFAR_Type', 'Threshold_Factor', 'Detected_Cells', 'True_Cells', 'False_Alarm_Cells', 'False_Cells', 'Detection_Rate', 'False_Alarm_Rate']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+
+        cfar_types = ['CA', 'OS', 'GO', 'SO']
+        guard_len = 3
+        noise_len = 10
+
+        for cfar_type in cfar_types:
+            results_file = f'cfar_evaluation_results_{cfar_type}.csv'
+            
+            with open(results_file, 'w', newline='') as csvfile:
+                fieldnames = ['Threshold_Factor', 'Detected_Cells', 'True_Cells', 'False_Alarm_Cells', 'False_Cells', 'Detection_Rate', 'False_Alarm_Rate']
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+
+                for threshold_factor in np.arange(0, 20.05, 0.05):
+                    # Reset metrics for each new threshold factor
+                    eval_dataset.total_detection_cells = 0
+                    eval_dataset.total_falsealarm_cells = 0
+                    eval_dataset.total_true_cells = 0
+                    eval_dataset.total_false_cells = 0
+
+                    eval_dataset.current_cfar_type = cfar_type
+                    eval_dataset.current_threshold_factor = threshold_factor
+                    
+                    for data in tqdm(eval_loader, desc=f'Processing CFAR: {cfar_type} with Threshold: {threshold_factor}'):
+                        eval_dataset.__getitem__(0)  # Run processing
+
+                    # Save results to CSV
+                    writer.writerow({
+                        'Threshold_Factor': threshold_factor,
+                        'Detected_Cells': eval_dataset.total_detection_cells,
+                        'True_Cells': eval_dataset.total_true_cells,
+                        'False_Alarm_Cells': eval_dataset.total_falsealarm_cells,
+                        'False_Cells': eval_dataset.total_false_cells,
+                        'Detection_Rate': eval_dataset.total_detection_cells / eval_dataset.total_true_cells if eval_dataset.total_true_cells > 0 else 0,
+                        'False_Alarm_Rate': eval_dataset.total_falsealarm_cells / eval_dataset.total_false_cells if eval_dataset.total_false_cells > 0 else 0
+                    })
+
+            logger.info(f'CFAR evaluation results for {cfar_type} saved to {results_file}')
+

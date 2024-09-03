@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Training script for the LSSL model
+# Training script for the RNN-based CFAR model
 
 # Define dataset paths and calibration paths as arrays
 DATASET_PATHS=(
@@ -26,26 +26,19 @@ CALIBRATION_PATHS=(
 )
 
 # Run the training script and pass arrays as arguments
-python train_model.py \
+python rnn_train.py \
   --dataset_paths "${DATASET_PATHS[@]}" \
   --calibration_paths "${CALIBRATION_PATHS[@]}" \
-  --num_layers 2 \
-  --hidden_dim 256 \
-  --order 256 \
-  --dt_min 1e-3 \
-  --dt_max 8e-5 \
-  --channels 1 \
-  --dropout 0.0 \
-  --learning_rate 1e-2 \
-  --batch_size 4 \
+  --learning_rate 1e-4 \
+  --batch_size 16 \
   --num_workers 4 \
   --total_steps 10000 \
-  --weight_decay 1e-1 \
+  --weight_decay 1e-2 \
   --optimizer AdamW \
-  --step_size 300 \
+  --step_size 1000 \
   --gamma 0.5 \
   --save_dir "./checkpoints" \
   --visualization_stride 100 \
-  --gpus 7 \
+  --gpus 1 \
   --log_dir "./logs" \
-  --loss_type "bce"
+  --loss_type "l1"

@@ -306,9 +306,11 @@ class LSSLModel(nn.Module):
 
         x = x * x_init
 
-        max_val = x.max(dim=-1, keepdim=True)[0]
-        threshold = self.threshold * max_val
-        x = torch.where(x >= threshold, x, torch.zeros_like(x))
+        # max_val = x.max(dim=-1, keepdim=True)[0]
+        # threshold = self.threshold * max_val
+        # x = torch.where(x >= threshold, x, torch.zeros_like(x))
+
+        
         # x = F.relu(x)
         # logger.debug(f"Output: {x}")
         # choose the max value in the last dimension
@@ -324,7 +326,7 @@ def count_parameters(model):
 
 
 if __name__ == "__main__":
-    num_layers = 4  # Example number of layers
+    num_layers = 2  # Example number of layers
     # d: hidden states, H; order: state space order, N; channels: M
     model = LSSLModel(num_layers, d=256, order=256, dt_min=8e-5, dt_max=1e-1, channels=1, dropout=0.1)
 

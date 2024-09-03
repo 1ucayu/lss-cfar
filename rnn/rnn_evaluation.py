@@ -7,10 +7,9 @@ import matplotlib.patches as patches
 import numpy as np
 from scipy.ndimage import label, find_objects
 from torch.utils.data import DataLoader, Dataset
-from model import LSSLModel
-from args import get_args
+from rnn_model import CFARRNN  # Import your RNN+CNN model
+from rnn_args import get_args
 from tqdm import tqdm
-from datetime import datetime
 
 class Evaluator(Dataset):
     def __init__(self, phase, dataset_paths, calibration_paths, checkpoint_path):
@@ -48,15 +47,7 @@ class Evaluator(Dataset):
         os.environ['CUDA_VISIBLE_DEVICES'] = args.gpus
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-        model = LSSLModel(
-            num_layers=2,
-            d=256,
-            order=256,
-            dt_min=1e-3,
-            dt_max=8e-5,
-            channels=1,
-            dropout=0.1
-        ).to(self.device)
+        model = CFARRNN().to(self.device)  # Use the RNN+CNN model
 
         model.load_state_dict(torch.load(checkpoint_path))
         self.model = model.eval()
@@ -64,7 +55,6 @@ class Evaluator(Dataset):
         # Initialize evaluation metrics
         self.total_detection_cells = 0
         self.total_falsealarm_cells = 0
-
         self.total_true_cells = 0
         self.total_false_cells = 0
 
@@ -92,30 +82,30 @@ class Evaluator(Dataset):
         if self.calibration:
             spectrum = spectrum - calibration_spectrum
 
-            pointcloud = torch.where(pointcloud == 1, torch.tensor(0), pointcloud)
-            pointcloud = torch.where(pointcloud == 2, torch.tensor(1), pointcloud)
+        pointcloud = pointcloud.unsqueeze(0)
+        spectrum = spectrum.unsqueeze(0)
 
-        # Flatten the spectrum and pointcloud
-        spectrum = spectrum.flatten()
-        pointcloud = pointcloud.flatten()
+        pointcloud = torch.where(pointcloud == 1, torch.tensor(0), pointcloud)
+        pointcloud = torch.where(pointcloud == 2, torch.tensor(1), pointcloud)
+        
+        # Normalize the spectrum as done during training (min-max normalization)
+        spectrum = (spectrum - spectrum.min()) / (spectrum.max() - spectrum.min())
 
         with torch.no_grad():
             spectrum_input = spectrum.unsqueeze(0).to(self.device)
             pointcloud_pred = self.model(spectrum_input)
 
-        pointcloud_pred_np = pointcloud_pred.squeeze().detach().cpu().view(87, 128).numpy()
-        pointcloud_gt_np = pointcloud.view(87, 128).numpy()
-        spectrum_np = spectrum.view(87, 128).numpy()
+        pointcloud_pred_np = pointcloud_pred.squeeze().detach().cpu().numpy()
+        pointcloud_gt_np = pointcloud.cpu().numpy().squeeze()
+        spectrum_np = spectrum.cpu().numpy().squeeze()
 
         # Finding the two largest closures (bounding boxes) in the ground truth
-        # bboxes = self.find_two_largest_closure_bboxes(pointcloud_gt_np, h_expand=8)
         if 'lucacx' in os.path.basename(data_path):
             bboxes = self.find_two_largest_closure_bboxes(pointcloud_gt_np, h_expand=8)
         else:
             bboxes = [self.find_max_closure_bbox(pointcloud_gt_np, h_expand=8)]
 
-        pointcloud_pred_np_mask = np.where(pointcloud_pred_np > pointcloud_pred_np.max()*0.75, 1, 0)
-        # pointcloud_pred_np_mask = np.where(pointcloud_pred_np > 0, 1, 0)
+        pointcloud_pred_np_mask = np.where(pointcloud_pred_np > 0.038, 1, 0)
         non_zero_positions = np.argwhere(pointcloud_pred_np_mask == 1)
 
         # Initialize variables for detection and false alarm rate calculation
@@ -124,45 +114,32 @@ class Evaluator(Dataset):
         falsealarm_cells = 0
         false_cells = 87 * 128  # Full figure size
 
-        # Calculate the detection rate and false alarm rate
         for bbox in bboxes:
             if bbox:
                 r1, c1, r2, c2 = bbox[0].start, bbox[1].start, bbox[0].stop, bbox[1].stop
 
-                # Ensure r2 and c2 are within bounds
-                r2 = min(r2, 86)  # r2 must be less than 87
-                c2 = min(c2, 127)  # c2 must be less than 128
+                r2 = min(r2, 86)
+                c2 = min(c2, 127)
 
-                bbox_height = r2 - r1
-                bbox_width = c2 - c1
-
-                # Add bounding box area (including boundaries) to true cells
-                bbox_area = (bbox_height + 1) * (bbox_width + 1)
+                bbox_area = (r2 - r1 + 1) * (c2 - c1 + 1)
                 true_cells += bbox_area
-                false_cells -= bbox_area  # Remove the bounding box area from false cells
-
-                # Check each row within the bounding box, if any point in the bbox
-                # the entire bbox area is considered detected
-                
+                false_cells -= bbox_area
 
                 for row in range(r1, r2 + 1):
                     row_points = pointcloud_pred_np_mask[row, c1:c2 + 1]
                     if np.any(row_points > 0):
                         detected_cells += bbox_area
                         break
-                #         detected_cells += bbox_width + 1  # Add the entire row width of the bounding box to detected cells
 
-        # Calculate false alarm cells
         outside_bbox_mask = np.ones_like(pointcloud_pred_np_mask)
         for bbox in bboxes:
             if bbox:
                 r1, c1, r2, c2 = bbox[0].start, bbox[1].start, bbox[0].stop, bbox[1].stop
 
-                # Ensure r2 and c2 are within bounds
-                r2 = min(r2, 86)  # r2 must be less than 87
-                c2 = min(c2, 127)  # c2 must be less than 128
+                r2 = min(r2, 86)
+                c2 = min(c2, 127)
 
-                outside_bbox_mask[r1:r2 + 1, c1:c2 + 1] = 0  # Mask out bounding box areas
+                outside_bbox_mask[r1:r2 + 1, c1:c2 + 1] = 0
 
         falsealarm_cells = np.sum(pointcloud_pred_np_mask * outside_bbox_mask)
 
@@ -192,40 +169,35 @@ class Evaluator(Dataset):
         axes[2].imshow(pointcloud_gt_np, cmap='gray', aspect='auto')
         axes[2].set_title('Ground Truth Pointcloud')
 
-        # Draw bounding boxes
         colors = ['red', 'green']
         for i, bbox in enumerate(bboxes):
             if bbox:
                 r1, c1, r2, c2 = bbox[0].start, bbox[1].start, bbox[0].stop, bbox[1].stop
 
-                # Ensure r2 and c2 are within bounds
-                r2 = min(r2, 86)  # r2 must be less than 87
-                c2 = min(c2, 127)  # c2 must be less than 128
+                r2 = min(r2, 86)
+                c2 = min(c2, 127)
 
                 rect = patches.Rectangle((c1, r1), c2 - c1, r2 - r1, linewidth=2, edgecolor=colors[i], facecolor='none')
                 axes[2].add_patch(rect)
 
-        # Draw all non-zero positions
         for pos in non_zero_positions:
             axes[2].plot(pos[1], pos[0], 'bo', markersize=5)
 
-        # Add a legend to indicate the points and bounding boxes
         axes[2].legend(['Points (Inside BBox)', 'Points (Outside BBox)', 'Largest BBox', 'Second Largest BBox'])
 
         plt.show()
 
-        # Save the figure in the corresponding path under /evaluation_visualization/
-        save_path = data_path.replace('/dataset/', '/200k_evaluation_visualization/').replace('.pickle', '.png')
+        save_path = data_path.replace('/dataset/', '/rnn_evaluation_visualization/').replace('.pickle', '.png')
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         fig.savefig(save_path)
 
         logger.info(f'Visualization saved to {save_path}')
 
-        plt.close(fig)  # Close the figure to free memory
+        plt.close(fig)
 
         return 0
 
-    def find_two_largest_closure_bboxes(self, matrix, h_expand=8):
+    def find_two_largest_closure_bboxes(self, matrix, h_expand=0):
         labeled_array, num_features = label(matrix)
         bounding_boxes = find_objects(labeled_array)
         # bounding_boxes are sorted by size in descending order.
@@ -241,43 +213,10 @@ class Evaluator(Dataset):
 
         return expanded_bboxes
 
-    # def find_max_closure_bbox(self, matrix, h_expand=8):
-        # # Label connected components of 1s
-        # labeled_array, num_features = label(matrix)
-        
-        # # Find bounding boxes of labeled components
-        # bounding_boxes = find_objects(labeled_array)
-        
-        # # Determine the largest connected component based on area
-        # max_area = 0
-        # max_bbox = None
-        # for bbox in bounding_boxes:
-        #     if bbox is not None:
-        #         area = (bbox[0].stop - bbox[0].start) * (bbox[1].stop - bbox[1].start)
-        #         if area > max_area:
-        #             max_area = area
-        #             max_bbox = bbox
-
-        # r1, c1, r2, c2 = max_bbox[0].start, max_bbox[1].start, max_bbox[0].stop, max_bbox[1].stop
-
-        # # The resolution for azimuth is 15 bins, so we extend the bounding box accordingly.
-        # # Extend r1 and r2 to the nearest multiple of 15.
-        # r1_extended = max(0, r1 - (r1 % 15))
-        # r2_extended = min(86, r2 + (15 - (r2 % 15)))  # Ensure r2 stays within bounds
-
-        # # Return the extended bounding box
-        # return (slice(r1_extended, r2_extended), slice(c1, c2))
-    def find_max_closure_bbox(self, matrix, h_expand=8):
-        # Label connected components of 1s
+    def find_max_closure_bbox(self, matrix, h_expand=0):
         labeled_array, num_features = label(matrix)
-        
-        # Find bounding boxes of labeled components
         bounding_boxes = find_objects(labeled_array)
-        
-        if not bounding_boxes:  # If no bounding boxes found, return None or an empty list
-            return []
 
-        # Determine the largest connected component based on area
         max_area = 0
         max_bbox = None
         for bbox in bounding_boxes:
@@ -287,18 +226,13 @@ class Evaluator(Dataset):
                     max_area = area
                     max_bbox = bbox
 
-        if max_bbox is None:
-            return []  # Return an empty list if no bounding box is found
-        
-        r1, c1, r2, c2 = max_bbox[0].start, max_bbox[1].start, max_bbox[0].stop, max_bbox[1].stop
-
-        # Extend r1 and r2 to the nearest multiple of 15.
-        r1_extended = max(0, r1 - (r1 % 15))
-        r2_extended = min(86, r2 + (15 - (r2 % 15)))  # Ensure r2 stays within bounds
-
-        # Return the extended bounding box
-        return [slice(r1_extended, r2_extended), slice(c1, c2)]
-
+        if max_bbox:
+            r1, c1 = max_bbox[0].start, max_bbox[1].start
+            r2, c2 = max_bbox[0].stop, max_bbox[1].stop 
+            r1 = max(r1 - h_expand, 0)
+            r2 = min(r2 + h_expand, matrix.shape[0] - 1)
+            return (slice(r1, r2), slice(c1, c2))
+        return None
 
 if __name__ == '__main__':
     dataset_paths = [
@@ -322,11 +256,10 @@ if __name__ == '__main__':
         "/data/lucayu/lss-cfar/raw_dataset/wayne_env_office_2024-08-27"
     ]
     
-    checkpoint_path = '/home/lucayu/lss-cfar/checkpoints/20240903-175512_model_layers_2_hidden_256_order_256_dtmin_0.001_dtmax_8e-05_channels_1_dropout_0.0_lr_0.01_batch_4_steps_10000_optimizer_AdamW_decay_0.1_step_300_gamma_0.5_losstype_bce/20240903-175512_model_layers_2_hidden_256_order_256_dtmin_0.001_dtmax_8e-05_channels_1_dropout_0.0_lr_0.01_batch_4_steps_10000_optimizer_AdamW_decay_0.1_step_300_gamma_0.5_losstype_bce.pt'
+    checkpoint_path = '/home/lucayu/lss-cfar/rnn/checkpoints/rnn_cnn_20240903-195045_layers_4_hidden_512_lr_0.0001_batch_16_steps_10000_optimizer_AdamW_decay_0.01_step_1000_gamma_0.5/rnn_cnn_20240903-195045_layers_4_hidden_512_lr_0.0001_batch_16_steps_10000_optimizer_AdamW_decay_0.01_step_1000_gamma_0.5.pt'
     eval_dataset = Evaluator(phase='test', dataset_paths=dataset_paths, calibration_paths=calibration_paths, checkpoint_path=checkpoint_path)
 
     eval_loader = DataLoader(eval_dataset, batch_size=1, shuffle=False)
 
     for data in tqdm(eval_loader):
         pass  # The __getitem__ method handles processing and accumulation
-
