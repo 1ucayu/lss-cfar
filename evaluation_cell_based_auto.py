@@ -11,6 +11,8 @@ from model import LSSLModel
 from args import get_args
 from tqdm import tqdm
 from datetime import datetime
+import csv
+import numpy as np
 
 class Evaluator(Dataset):
     def __init__(self, phase, dataset_paths, calibration_paths, checkpoint_path):
@@ -114,7 +116,7 @@ class Evaluator(Dataset):
         else:
             bboxes = [self.find_max_closure_bbox(pointcloud_gt_np, h_expand=8)]
 
-        threshold = 0.8
+        # threshold = 0.75
         pointcloud_pred_np_mask = np.where(pointcloud_pred_np > pointcloud_pred_np.max()*threshold, 1, 0)
         # pointcloud_pred_np_mask = np.where(pointcloud_pred_np > 0, 1, 0)
         non_zero_positions = np.argwhere(pointcloud_pred_np_mask == 1)
@@ -182,47 +184,49 @@ class Evaluator(Dataset):
         logger.debug(f"False Alarm Rate: {self.total_falsealarm_cells / self.total_false_cells}")
 
         # Visualization code
-        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+        isVisualization = False
+        if isVisualization:
+            fig, axes = plt.subplots(1, 3, figsize=(15, 5))
 
-        axes[0].imshow(spectrum_np, cmap='viridis', aspect='auto')
-        axes[0].set_title('Spectrum')
+            axes[0].imshow(spectrum_np, cmap='viridis', aspect='auto')
+            axes[0].set_title('Spectrum')
 
-        axes[1].imshow(pointcloud_pred_np_mask, cmap='gray', aspect='auto')
-        axes[1].set_title('Predicted Pointcloud Mask')
+            axes[1].imshow(pointcloud_pred_np_mask, cmap='gray', aspect='auto')
+            axes[1].set_title('Predicted Pointcloud Mask')
 
-        axes[2].imshow(pointcloud_gt_np, cmap='gray', aspect='auto')
-        axes[2].set_title('Ground Truth Pointcloud')
+            axes[2].imshow(pointcloud_gt_np, cmap='gray', aspect='auto')
+            axes[2].set_title('Ground Truth Pointcloud')
 
-        # Draw bounding boxes
-        colors = ['red', 'green']
-        for i, bbox in enumerate(bboxes):
-            if bbox:
-                r1, c1, r2, c2 = bbox[0].start, bbox[1].start, bbox[0].stop, bbox[1].stop
+            # Draw bounding boxes
+            colors = ['red', 'green']
+            for i, bbox in enumerate(bboxes):
+                if bbox:
+                    r1, c1, r2, c2 = bbox[0].start, bbox[1].start, bbox[0].stop, bbox[1].stop
 
-                # Ensure r2 and c2 are within bounds
-                r2 = min(r2, 86)  # r2 must be less than 87
-                c2 = min(c2, 127)  # c2 must be less than 128
+                    # Ensure r2 and c2 are within bounds
+                    r2 = min(r2, 86)  # r2 must be less than 87
+                    c2 = min(c2, 127)  # c2 must be less than 128
 
-                rect = patches.Rectangle((c1, r1), c2 - c1, r2 - r1, linewidth=2, edgecolor=colors[i], facecolor='none')
-                axes[2].add_patch(rect)
+                    rect = patches.Rectangle((c1, r1), c2 - c1, r2 - r1, linewidth=2, edgecolor=colors[i], facecolor='none')
+                    axes[2].add_patch(rect)
 
-        # Draw all non-zero positions
-        for pos in non_zero_positions:
-            axes[2].plot(pos[1], pos[0], 'bo', markersize=5)
+            # Draw all non-zero positions
+            for pos in non_zero_positions:
+                axes[2].plot(pos[1], pos[0], 'bo', markersize=5)
 
-        # Add a legend to indicate the points and bounding boxes
-        axes[2].legend(['Points (Inside BBox)', 'Points (Outside BBox)', 'Largest BBox', 'Second Largest BBox'])
+            # Add a legend to indicate the points and bounding boxes
+            axes[2].legend(['Points (Inside BBox)', 'Points (Outside BBox)', 'Largest BBox', 'Second Largest BBox'])
 
-        plt.show()
+            plt.show()
 
-        # Save the figure in the corresponding path under /evaluation_visualization/
-        save_path = data_path.replace('/dataset/', '/200k_evaluation_visualization/').replace('.pickle', '.png')
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        fig.savefig(save_path)
+            # Save the figure in the corresponding path under /evaluation_visualization/
+            save_path = data_path.replace('/dataset/', '/200k_evaluation_visualization/').replace('.pickle', '.png')
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            fig.savefig(save_path)
 
-        logger.info(f'Visualization saved to {save_path}')
+            logger.info(f'Visualization saved to {save_path}')
 
-        plt.close(fig)  # Close the figure to free memory
+            plt.close(fig)  # Close the figure to free memory
 
         return 0
 
@@ -303,33 +307,67 @@ class Evaluator(Dataset):
 
 if __name__ == '__main__':
     dataset_paths = [
-        # "/data/lucayu/lss-cfar/dataset/cx_corridor_2024-08-27",
-        # "/data/lucayu/lss-cfar/dataset/cx_env_corridor_2024-08-27",
-        # "/data/lucayu/lss-cfar/dataset/luca_env_hw_101_2024-08-23",
-        # "/data/lucayu/lss-cfar/dataset/luca_hw_101_2024-08-23",
-        # "/data/lucayu/lss-cfar/dataset/lucacx_corridor_2024-08-27",
-        # "/data/lucayu/lss-cfar/dataset/lucacx_env_corridor_2024-08-27",
-        # "/data/lucayu/lss-cfar/dataset/wayne_env_office_2024-08-27",
-        # "/data/lucayu/lss-cfar/dataset/wayne_office_2024-08-27"
-        "/data/lucayu/lss-cfar/unseen/dataset"
+        "/data/lucayu/lss-cfar/dataset/cx_corridor_2024-08-27",
+        "/data/lucayu/lss-cfar/dataset/cx_env_corridor_2024-08-27",
+        "/data/lucayu/lss-cfar/dataset/luca_env_hw_101_2024-08-23",
+        "/data/lucayu/lss-cfar/dataset/luca_hw_101_2024-08-23",
+        "/data/lucayu/lss-cfar/dataset/lucacx_corridor_2024-08-27",
+        "/data/lucayu/lss-cfar/dataset/lucacx_env_corridor_2024-08-27",
+        "/data/lucayu/lss-cfar/dataset/wayne_env_office_2024-08-27",
+        "/data/lucayu/lss-cfar/dataset/wayne_office_2024-08-27"
     ]
     calibration_paths = [
-        # "/data/lucayu/lss-cfar/raw_dataset/cx_env_corridor_2024-08-27",
-        # "/data/lucayu/lss-cfar/raw_dataset/cx_env_corridor_2024-08-27",
-        # "/data/lucayu/lss-cfar/raw_dataset/luca_env_hw_101_2024-08-23",
-        # "/data/lucayu/lss-cfar/raw_dataset/luca_env_hw_101_2024-08-23",
-        # "/data/lucayu/lss-cfar/raw_dataset/lucacx_env_corridor_2024-08-27",
-        # "/data/lucayu/lss-cfar/raw_dataset/lucacx_env_corridor_2024-08-27",
-        # "/data/lucayu/lss-cfar/raw_dataset/wayne_env_office_2024-08-27",
-        # "/data/lucayu/lss-cfar/raw_dataset/wayne_env_office_2024-08-27"
-        "/data/lucayu/lss-cfar/unseen/raw_dataset/luca_env_hw_101_2024-08-25"
+        "/data/lucayu/lss-cfar/raw_dataset/cx_env_corridor_2024-08-27",
+        "/data/lucayu/lss-cfar/raw_dataset/cx_env_corridor_2024-08-27",
+        "/data/lucayu/lss-cfar/raw_dataset/luca_env_hw_101_2024-08-23",
+        "/data/lucayu/lss-cfar/raw_dataset/luca_env_hw_101_2024-08-23",
+        "/data/lucayu/lss-cfar/raw_dataset/lucacx_env_corridor_2024-08-27",
+        "/data/lucayu/lss-cfar/raw_dataset/lucacx_env_corridor_2024-08-27",
+        "/data/lucayu/lss-cfar/raw_dataset/wayne_env_office_2024-08-27",
+        "/data/lucayu/lss-cfar/raw_dataset/wayne_env_office_2024-08-27"
     ]
     
     checkpoint_path = '/home/lucayu/lss-cfar/checkpoints/20240903-175512_model_layers_2_hidden_256_order_256_dtmin_0.001_dtmax_8e-05_channels_1_dropout_0.0_lr_0.01_batch_4_steps_10000_optimizer_AdamW_decay_0.1_step_300_gamma_0.5_losstype_bce/20240903-175512_model_layers_2_hidden_256_order_256_dtmin_0.001_dtmax_8e-05_channels_1_dropout_0.0_lr_0.01_batch_4_steps_10000_optimizer_AdamW_decay_0.1_step_300_gamma_0.5_losstype_bce.pt'
     eval_dataset = Evaluator(phase='test', dataset_paths=dataset_paths, calibration_paths=calibration_paths, checkpoint_path=checkpoint_path)
-
     eval_loader = DataLoader(eval_dataset, batch_size=1, shuffle=False)
 
-    for data in tqdm(eval_loader):
-        pass  # The __getitem__ method handles processing and accumulation
+    # CSV file to save results
+    results_file = 'evaluation_results.csv'
+
+    # Open the CSV file for writing
+    with open(results_file, 'w', newline='') as csvfile:
+        fieldnames = ['Threshold', 'Detected_Cells', 'True_Cells', 'False_Alarm_Cells', 'False_Cells', 'Detection_Rate', 'False_Alarm_Rate']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+
+        # Iterate through thresholds from 0 to 1 with step 0.05
+        for threshold in np.arange(-1.05, 1.05, 0.01):
+            # Reset metrics for each new threshold
+            eval_dataset.total_detection_cells = 0
+            eval_dataset.total_falsealarm_cells = 0
+            eval_dataset.total_true_cells = 0
+            eval_dataset.total_false_cells = 0
+
+            # Set the current threshold in the dataset
+            eval_dataset.current_threshold = threshold
+
+            for data in tqdm(eval_loader, desc=f'Processing with Threshold: {threshold}'):
+                eval_dataset.__getitem__(0)  # Run processing
+
+            # Calculate detection and false alarm rates
+            detection_rate = eval_dataset.total_detection_cells / eval_dataset.total_true_cells if eval_dataset.total_true_cells > 0 else 0
+            false_alarm_rate = eval_dataset.total_falsealarm_cells / eval_dataset.total_false_cells if eval_dataset.total_false_cells > 0 else 0
+
+            # Save results to CSV
+            writer.writerow({
+                'Threshold': threshold,
+                'Detected_Cells': eval_dataset.total_detection_cells,
+                'True_Cells': eval_dataset.total_true_cells,
+                'False_Alarm_Cells': eval_dataset.total_falsealarm_cells,
+                'False_Cells': eval_dataset.total_false_cells,
+                'Detection_Rate': detection_rate,
+                'False_Alarm_Rate': false_alarm_rate
+            })
+
+    logger.info(f'Evaluation results saved to {results_file}')
 
